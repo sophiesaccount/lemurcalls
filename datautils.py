@@ -289,13 +289,15 @@ class VocalSegDataset(Dataset):
         decoder_input_ids = decoder_input_ids[:-1]
         decoder_input_ids += [ self.tokenizer.pad_token_id ] * ( self.max_length - len( decoder_input_ids ) )
         labels += [-100] * ( self.max_length  - len(labels) )
-        
-        return {
-            "input_features":input_features,
-            "decoder_input_ids":np.array(decoder_input_ids),
-            "labels":np.array(labels)
-        }
 
+        output = {
+            "input_features": input_features,
+            "decoder_input_ids": np.array(decoder_input_ids),
+            "labels": np.array(labels)
+        }
+        print("Sample return types/dtypes/shapes:",
+            {k: (type(v), getattr(v, 'dtype', None), getattr(v, 'shape', None)) for k, v in output.items()})
+        return output
 
 
 

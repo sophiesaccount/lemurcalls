@@ -239,6 +239,10 @@ if __name__ == "__main__":
 
     for epoch in range(args.max_num_epochs + 1):  # This +1 is to ensure current_step can reach args.max_num_iterations
         for count, batch in enumerate( tqdm( training_dataloader, desc=f'epoch-{epoch:03}', disable=is_scheduled_job()) ):
+            print("First batch type:", type(batch))
+            for k, v in batch.items():
+                print(f"  {k}: {type(v)}, {getattr(v, 'dtype', None)}, {getattr(v, 'shape', None)}")
+            break  # just for testing, to see the content of the first batch
             training_loss_value_list.append( train_iteration(batch) )
             
             if scheduler is not None:
