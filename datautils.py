@@ -12,6 +12,8 @@ from audio_utils import WhisperSegFeatureExtractor
 from util.common import is_scheduled_job
 from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
+import torch
+
 
 def get_audio_and_label_paths( folder ):
     wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith(".wav") ]
@@ -291,12 +293,10 @@ class VocalSegDataset(Dataset):
         labels += [-100] * ( self.max_length  - len(labels) )
 
         output = {
-            "input_features": input_features,
-            "decoder_input_ids": np.array(decoder_input_ids),
-            "labels": np.array(labels)
+            "input_features": torch.tensor(input_features, dtype=torch.float32),
+            "decoder_input_ids": torch.tensor(np.array(decoder_input_ids), dtype = torch.int64),
+            "labels": torch.tensor(np.array(labels), dtype = torch.int64)
         }
-        print("Sample return types/dtypes/shapes:",
-            {k: (type(v), getattr(v, 'dtype', None), getattr(v, 'shape', None)) for k, v in output.items()})
         return output
 
 
