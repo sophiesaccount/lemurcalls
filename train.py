@@ -22,6 +22,26 @@ from model import WhisperSegmenterForEval, load_model, save_model
 from util.common import EarlyStopHandler, is_scheduled_job
 from util.confusion_framewise import confusion_matrix_framewise
 from utils import *
+from torch.nn.utils.rnn import pad_sequence
+
+
+def collate_fn(batch):
+    # batch is a list of samples (dicts)
+    
+    input_features = [torch.tensor(item["input_features"], dtype=torch.float32) for item in batch]
+    decoder_input_ids = [torch.tensor(item["decoder_input_ids"], dtype=torch.int64) for item in batch]
+    labels = [torch.tensor(item["labels"], dtype=torch.int64) for item in batch]
+
+    # Stack tensors along the first dimension (batch dimension)
+    input_features = torch.stack(input_features)
+    decoder_input_ids = torch.stack(decoder_input_ids)
+    labels = torch.stack(labels)
+
+    return {
+        "input_features": input_features,
+        "decoder_input_ids": decoder_input_ids,
+        "labels": labels,
+    }
 
 
 def train_iteration(batch):
@@ -208,7 +228,8 @@ if __name__ == "__main__":
                                              worker_init_fn = lambda x:[np.random.seed( epoch  + x ),  
                                                                     torch.manual_seed( epoch + x) ], 
                                              num_workers = args.num_workers , drop_last= True,
-                                             pin_memory = False
+                                             pin_memory = False,
+                                             collate_fn = collate_fn
                                            )
 
     if len(training_dataloader) == 0:
@@ -239,10 +260,6 @@ if __name__ == "__main__":
 
     for epoch in range(args.max_num_epochs + 1):  # This +1 is to ensure current_step can reach args.max_num_iterations
         for count, batch in enumerate( tqdm( training_dataloader, desc=f'epoch-{epoch:03}', disable=is_scheduled_job()) ):
-            print("First batch type:", type(batch))
-            for k, v in batch.items():
-                print(f"  {k}: {type(v)}, {getattr(v, 'dtype', None)}, {getattr(v, 'shape', None)}")
-            break  # just for testing, to see the content of the first batch
             training_loss_value_list.append( train_iteration(batch) )
             
             if scheduler is not None:
