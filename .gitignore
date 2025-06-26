@@ -170,3 +170,4 @@ experiments/
 *.jsonr
 *.wav
 *.txt
+final_checkpoint_ct2/model.bin
