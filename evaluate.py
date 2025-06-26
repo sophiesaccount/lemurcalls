@@ -9,7 +9,7 @@ from typing import Dict, List, Union
 import librosa
 import numpy as np
 
-from datautils import get_audio_and_label_paths
+from datautils import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
 from model import WhisperSegmenterFast
 from train import evaluate
 from utils import create_if_not_exists
@@ -30,7 +30,7 @@ def convert_numpy_to_regular(data: Union[np.generic, List, Dict]):
     else:
         return data
 
-def evaluate_dataset(dataset_path: str, model_path: str, num_trials: int, consolidation_method: str = "clustering",
+def evaluate_dataset(audio_folder: str, label_folder:str, model_path: str, num_trials: int, consolidation_method: str = "clustering",
                       max_length: int = 448, num_beams: int = 4, batch_size: int = 8, **kwargs) -> Dict:
     """Evaluate a trained WhisperSeg checkpoint on a dataset.
 
@@ -47,7 +47,12 @@ def evaluate_dataset(dataset_path: str, model_path: str, num_trials: int, consol
         dict: Evaluation results
     """
     audio_list, label_list = [], []
-    audio_paths, label_paths = get_audio_and_label_paths(dataset_path)
+    #audio_paths, label_paths = get_audio_and_label_paths(dataset_path)
+    if args.audio_folder and args.label_folder:
+        audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+            args.audio_folder, args.label_folder)
+    else:
+        audio_paths, label_paths = get_audio_and_label_paths(args.train_dataset_folder)
     for audio_path, label_path in zip(audio_paths, label_paths):
         with open(label_path, 'r') as f:
             label = json.load(f)
@@ -86,7 +91,9 @@ if __name__ == "__main__":
     logging.getLogger().setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser(description="Evaluate a trained WhisperSeg checkpoint on a dataset.")
-    parser.add_argument("-d", "--dataset_path", type=str, help="Path to the dataset to be evaluated", required=True)
+    #parser.add_argument("-d", "--dataset_path", type=str, help="Path to the dataset to be evaluated", required=False)
+    parser.add_argument("--audio_folder", type=str, help="Path to the dataset to be evaluated", required=True)
+    parser.add_argument("--label_folder", type=str, help="Path to the dataset to be evaluated", required=True)
     parser.add_argument("-m", "--model_path", type=str, help="Path to the trained model checkpoint", required=True)
     parser.add_argument("-o", "--output_dir", type=str, help="Path to a directory where the output files will be saved", default=None)
     parser.add_argument("-i", "--identifier", type=str, help="Unique identifier used for the output file name in case model path and dataset name are not meaningful.", default=None)
@@ -99,7 +106,7 @@ if __name__ == "__main__":
     else:
         out_path = args.output_dir
     if args.identifier == None:
-        out_name=os.path.join(out_path, datetime.now().strftime("%Y%m%d-%H%M%S") + f'_eval_{Path(args.model_path).stem}_{Path(args.dataset_path).stem}.txt')
+        out_name=os.path.join(out_path, datetime.now().strftime("%Y%m%d-%H%M%S") + f'_eval_{Path(args.model_path).stem}_{Path(args.label_folder).stem}.txt')
     else:
         out_name=os.path.join(out_path, datetime.now().strftime("%Y%m%d-%H%M%S") + f'_eval_{args.identifier}.txt')
     with open(out_name, "w") as f:

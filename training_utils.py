@@ -15,7 +15,7 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 from convert_hf_to_ct2 import convert_hf_to_ct2
-from datautils import (VocalSegDataset, get_audio_and_label_paths,
+from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
                        slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model

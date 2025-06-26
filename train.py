@@ -15,7 +15,7 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 from convert_hf_to_ct2 import convert_hf_to_ct2
-from datautils import (VocalSegDataset, get_audio_and_label_paths,
+from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
                        slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model
@@ -122,8 +122,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--initial_model_path" )
+    parser.add_argument("--train_dataset_folder", default=None )
     parser.add_argument("--model_folder" )
-    parser.add_argument("--train_dataset_folder" )
+    parser.add_argument("--audio_folder" )
+    parser.add_argument("--label_folder" )
     parser.add_argument("--n_device", type = int, default = 1 )
     parser.add_argument("--gpu_list", type = int, nargs = "+", default = None )
     parser.add_argument("--project", default = "wseg-lemur" )
@@ -213,7 +215,13 @@ if __name__ == "__main__":
 
     scaler = torch.cuda.amp.GradScaler()
 
-    audio_path_list_train, label_path_list_train = get_audio_and_label_paths( args.train_dataset_folder )  
+    #audio_path_list_train, label_path_list_train = get_audio_and_label_paths( args.train_dataset_folder )  
+
+    if args.audio_folder and args.label_folder:
+        audio_path_list_train, label_path_list_train = get_audio_and_label_paths_from_folders(
+            args.audio_folder, args.label_folder)
+    else:
+        audio_path_list_train, label_path_list_train = get_audio_and_label_paths(args.train_dataset_folder)
 
     cluster_codebook = get_cluster_codebook( label_path_list_train, segmenter.cluster_codebook )
     segmenter.update_cluster_codebook( cluster_codebook )
@@ -328,13 +336,17 @@ if __name__ == "__main__":
 
     if best_checkpoint_batch_number is not None:
         print("The best checkpoint on validation set is: %s," % ( args.model_folder+"/checkpoint-%d"%(best_checkpoint_batch_number) ) )
-        os.system( "cp -r %s %s"%( args.model_folder+"/checkpoint-%d"%(best_checkpoint_batch_number), args.model_folder+"/final_checkpoint"  ) )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        hf_model_folder = f"{args.model_folder}/final_checkpoint_{timestamp}"
+        ct2_model_folder = hf_model_folder + "_ct2"
+
+        os.system( "cp -r %s %s"%( args.model_folder+"/checkpoint-%d"%(best_checkpoint_batch_number), hf_model_folder ) )
         ### remove other checkpoints
         os.system( "rm -r %s"%( args.model_folder+"/checkpoint-*" ) )
 
-        hf_model_folder = args.model_folder+"/final_checkpoint"
-        ct2_model_folder = hf_model_folder + "_ct2"
-
         convert_hf_to_ct2(model=hf_model_folder, output_dir=ct2_model_folder, quantization="float16")
 
+        params_path = os.path.join(hf_model_folder, "training_args.json")
+        with open(params_path, "w") as f:
+            json.dump(vars(args), f, indent=4)
     print("All Done!")
