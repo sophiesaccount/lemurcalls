@@ -163,3 +163,8 @@ results/
 model_folder/
 
 final_checkpoint_ct2/
+
+*.json
+*.jsonr
+*.wav
+*.txt
