@@ -9,9 +9,11 @@ from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 from tqdm import tqdm
 import wandb
+from datetime import datetime
+import json
 
 from utils import get_lr, create_if_not_exists
-from datautils import (VocalSegDataset, get_audio_and_label_paths,
+from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data, slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model
 from convert_hf_to_ct2 import convert_hf_to_ct2
@@ -38,7 +40,14 @@ def main(args):
 
     segmenter = WhisperSegmenterForEval(model=model, tokenizer=tokenizer)
 
-    audio_paths, label_paths = get_audio_and_label_paths(args.train_dataset_folder)
+    #audio_paths, label_paths = get_audio_and_label_paths(args.train_dataset_folder)
+
+    if args.audio_folder and args.label_folder:
+        audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+            args.audio_folder, args.label_folder)
+    else:
+        audio_paths, label_paths = get_audio_and_label_paths(args.train_dataset_folder)
+
     cluster_codebook = get_cluster_codebook(label_paths, segmenter.cluster_codebook)
     segmenter.update_cluster_codebook(cluster_codebook)
 
@@ -57,7 +66,7 @@ def main(args):
         args.max_num_iterations = len(dataloader) * args.max_num_epochs
 
     #total_steps = len(dataloader) * args.max_num_epochs
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=1, min_lr=1e-10)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=4, min_lr=1e-10)
 
     current_step = 0
     training_losses = []
@@ -104,12 +113,13 @@ def main(args):
             break
 
     # Save final model once after training
-    final_model_save_path = f"{args.model_folder}/final_model"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_model_save_path = f"{args.model_folder}/final_model_{timestamp}"
     save_model(model, tokenizer, current_step, final_model_save_path, max_to_keep=1)
     print("Training complete. Model saved to:", final_model_save_path)
 
     # Path to your saved_model folder
-    base_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder/final_model"
+    base_path = final_model_save_path
 
     # List all entries in the directory
     all_entries = os.listdir(base_path)
@@ -127,14 +137,18 @@ def main(args):
     checkpoint_path = os.path.join(base_path, latest_checkpoint)
 
     print(f"Using checkpoint at: {checkpoint_path}")
-    convert_hf_to_ct2(model=checkpoint_path, output_dir=f"{args.model_folder}/final_checkpoint_ct2", quantization="float16")
-    
+    convert_hf_to_ct2(model=checkpoint_path, output_dir=f"{args.model_folder}/final_checkpoint_ct2_{timestamp}", quantization="float16")
+    params_path = os.path.join(final_model_save_path, "training_args.json")
+    with open(params_path, "w") as f:
+        json.dump(vars(args), f, indent=4)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--initial_model_path")
     parser.add_argument("--model_folder")
-    parser.add_argument("--train_dataset_folder")
+    parser.add_argument("--audio_folder")
+    parser.add_argument("--label_folder")
+    parser.add_argument("--train_dataset_folder", default=None)
     parser.add_argument("--n_device", type=int, default=1)
     parser.add_argument("--gpu_list", type=int, nargs="+", default=[0])
     parser.add_argument("--project", default="wseg-lemur")

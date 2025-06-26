@@ -27,6 +27,17 @@ def get_audio_and_label_paths( folder ):
     
     return audio_paths, label_paths
 
+def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
+    audio_files = {os.path.splitext(f)[0]: os.path.join(audio_folder, f)
+                   for f in os.listdir(audio_folder) if f.endswith(".wav")}
+    label_files = {os.path.splitext(f)[0]: os.path.join(label_folder, f)
+                   for f in os.listdir(label_folder) if f.endswith(".json")}
+    # Only keep pairs where both audio and label exist
+    common_keys = set(audio_files.keys()) & set(label_files.keys())
+    audio_paths = [audio_files[k] for k in sorted(common_keys)]
+    label_paths = [label_files[k] for k in sorted(common_keys)]
+    return audio_paths, label_paths
+
 def get_cluster_codebook( label_paths, initial_cluster_codebook ):
     cluster_codebook = deepcopy( initial_cluster_codebook )
     
