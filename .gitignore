@@ -164,6 +164,8 @@ model_folder/
 
 final_checkpoint_ct2/
 
+experiments/
+
 *.json
 *.jsonr
 *.wav
