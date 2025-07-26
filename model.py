@@ -556,7 +556,7 @@ class WhisperSegmenterForEval(SegmenterBase):
         generated_text_list = []
         
         for pos in range( 0, len(sliced_audios_features), batch_size ):
-            input_features = torch.from_numpy( np.asarray([ item[2] for item in sliced_audios_features[pos:pos+batch_size] ]) ).to(self.device)
+            input_features = torch.tensor([ item[2] for item in sliced_audios_features[pos:pos+batch_size] ], dtype=torch.float32).to(self.device)
             generated_ids = self.model.generate( inputs = input_features,  
                                                  decoder_input_ids = torch.LongTensor([ self.tokenizer.convert_tokens_to_ids( [ "<|startoftranscript|>", "<|en|>", "<|notimestamps|>"] ) for _ in range( input_features.size(0) )]).to(self.device),
                                                  pad_token_id = self.tokenizer.pad_token_id,
@@ -599,7 +599,7 @@ class WhisperSegmenter(SegmenterBase):
         tokenizer = self.tokenizer_list[thread_id]
         generated_text_list = []
         for pos in range( 0, len(sliced_audios_features), batch_size ):
-            input_features = torch.from_numpy( np.asarray([ item[2] for item in sliced_audios_features[pos:pos+batch_size] ]) ).to(device)
+            input_features = torch.tensor([ item[2] for item in sliced_audios_features[pos:pos+batch_size] ], dtype=torch.float32).to(device)
             generated_ids = model.generate( inputs = input_features,  
                                                  decoder_input_ids = torch.LongTensor([ tokenizer.convert_tokens_to_ids( [ "<|startoftranscript|>", "<|en|>", "<|notimestamps|>"] ) 
                                                                                           for _ in range( input_features.size(0) )]).to(device),
