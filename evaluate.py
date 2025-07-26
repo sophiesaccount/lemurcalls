@@ -92,8 +92,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Evaluate a trained WhisperSeg checkpoint on a dataset.")
     #parser.add_argument("-d", "--dataset_path", type=str, help="Path to the dataset to be evaluated", required=False)
-    parser.add_argument("--audio_folder", type=str, help="Path to the dataset to be evaluated", required=True)
-    parser.add_argument("--label_folder", type=str, help="Path to the dataset to be evaluated", required=True)
+    parser.add_argument("-a","--audio_folder", type=str, help="Path to the dataset to be evaluated", required=True)
+    parser.add_argument("-l","--label_folder", type=str, help="Path to the dataset to be evaluated", required=True)
     parser.add_argument("-m", "--model_path", type=str, help="Path to the trained model checkpoint", required=True)
     parser.add_argument("-o", "--output_dir", type=str, help="Path to a directory where the output files will be saved", default=None)
     parser.add_argument("-i", "--identifier", type=str, help="Unique identifier used for the output file name in case model path and dataset name are not meaningful.", default=None)
