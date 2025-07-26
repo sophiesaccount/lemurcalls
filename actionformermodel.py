@@ -2,16 +2,16 @@ import torch
 import torch.nn as nn
 from transformers import WhisperModel
 
-# Anzahl der Klassen
-NUM_CLASSES = 10  # Beispiel: 10 Aktionsklassen
+
+NUM_CLASSES = 10  # number of classes TODO: make this an input 
 INPUT_DIM = 512   # Whisper encoder hidden size (for small model)
 KERNEL_SIZE = 3
 
-# 1. Whisper Encoder laden (z.B. Whisper Small)
+# 1. Load Whisper Encoder (e.g. Whisper Small)
 whisper_model = WhisperModel.from_pretrained("openai/whisper-small")
 encoder = whisper_model.encoder
 
-# 2. Classification Head (wie in ActionFormer)
+# 2. Classification Head (similar to ActionFormer) 
 class ClassificationHead(nn.Module):
     def __init__(self, input_dim=INPUT_DIM, num_classes=NUM_CLASSES):
         super().__init__()
@@ -36,7 +36,7 @@ class ClassificationHead(nn.Module):
         return x.transpose(1, 2)  # → (B, T, num_classes)
 
 
-# 3. Regression Head (wie in ActionFormer)
+# 3. Regression Head (wie in ActionFormer)(halt auch nach Klassen!)
 class RegressionHead(nn.Module):
     def __init__(self, input_dim=INPUT_DIM):
         super().__init__()
@@ -56,7 +56,7 @@ class RegressionHead(nn.Module):
         x = self.norm2(x).transpose(1, 2)
         x = torch.relu(x)
 
-        x = self.conv3(x)                   # → (B, 2, T)
+        x = self.conv3(x)                   # → (B, 2, T)  häää hier müsste auch noch je Klasse sein!!
         x = torch.relu(x)                   # ReLU for positive distances
         return x.transpose(1, 2)            # → (B, T, 2)
 
