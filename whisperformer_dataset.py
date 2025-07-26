@@ -5,7 +5,7 @@ import librosa
 import json
 
 
-class ActionFormerDataset(Dataset):
+class WhisperFormerDataset(Dataset):
     """Dataset for ActionFormer model - converts audio to frame-wise classification"""
     
     def __init__(self, audio_list, label_list, max_length=100, total_spec_columns=1000):

@@ -16,8 +16,8 @@ from utils import get_lr, create_if_not_exists
 from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data, slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model
-from actionformermodel import WhisperActionFormer 
-from actionformer_dataset import ActionFormerDataset
+from actionformermodel import WhisperFormer 
+from actionformer_dataset import WhisperFormerDataset
 from convert_hf_to_ct2 import convert_hf_to_ct2
 from util.common import EarlyStopHandler
 from training_utils import collate_fn, train_iteration, evaluate
@@ -132,15 +132,9 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
         # Forward pass
         class_preds, regr_preds = model(batch["input_features"])
         
-        # Calculate classification loss (focal loss) #TODO
-        class_loss = nn.CrossEntropyLoss()(class_preds.view(-1, class_preds.size(-1)), 
-                                          batch["labels"].view(-1))
-        
-        # Calculate regression loss (dIoU) #TODO
-        regr_loss = nn.MSELoss()(regr_preds, torch.zeros_like(regr_preds))  
-        
-        # Total loss
-        total_loss = class_loss + 0.1 * regr_loss  # Weight the losses
+        # Calculate losses
+        cls_loss, reg_loss, total_loss = losses(fpn_masks, out_cls_logits, out_offsets, gt_cls_labels, gt_offsets)
+
     
     scaler.scale(total_loss).backward()
     scaler.step(optimizer)
