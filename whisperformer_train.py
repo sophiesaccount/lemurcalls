@@ -57,6 +57,69 @@ def actionformer_collate_fn(batch):
         "labels": labels,
     }
 
+#TODO
+def losses(
+        self, fpn_masks,
+        out_cls_logits, out_offsets,
+        gt_cls_labels, gt_offsets
+    ):
+        # fpn_masks, out_*: F (List) [B, T_i, C]
+        # gt_* : B (list) [F T, C]
+        # fpn_masks -> (B, FT)
+        valid_mask = torch.cat(fpn_masks, dim=1)
+
+        # 1. classification loss
+        # stack the list -> (B, FT) -> (# Valid, )
+        gt_cls = torch.stack(gt_cls_labels)
+        pos_mask = torch.logical_and((gt_cls.sum(-1) > 0), valid_mask)
+
+        # cat the predicted offsets -> (B, FT, 2 (xC)) -> # (#Pos, 2 (xC))
+        pred_offsets = torch.cat(out_offsets, dim=1)[pos_mask]
+        gt_offsets = torch.stack(gt_offsets)[pos_mask]
+
+        # update the loss normalizer
+        num_pos = pos_mask.sum().item()
+        self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
+            1 - self.loss_normalizer_momentum
+        ) * max(num_pos, 1)
+
+        # gt_cls is already one hot encoded now, simply masking out
+        gt_target = gt_cls[valid_mask]
+
+        # optinal label smoothing
+        gt_target *= 1 - self.train_label_smoothing
+        gt_target += self.train_label_smoothing / (self.num_classes + 1)
+
+        # focal loss
+        cls_loss = sigmoid_focal_loss(
+            torch.cat(out_cls_logits, dim=1)[valid_mask],
+            gt_target,
+            reduction='sum'
+        )
+        cls_loss /= self.loss_normalizer
+
+        # 2. regression using IoU/GIoU loss (defined on positive samples)
+        if num_pos == 0:
+            reg_loss = 0 * pred_offsets.sum()
+        else:
+            # giou loss defined on positive samples
+            reg_loss = ctr_diou_loss_1d(
+                pred_offsets,
+                gt_offsets,
+                reduction='sum'
+            )
+            reg_loss /= self.loss_normalizer
+
+        if self.train_loss_weight > 0:
+            loss_weight = self.train_loss_weight
+        else:
+            loss_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
+
+        # return a dict of losses
+        final_loss = cls_loss + reg_loss * loss_weight
+        return {'cls_loss'   : cls_loss,
+                'reg_loss'   : reg_loss,
+                'final_loss' : final_loss}
 
 def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, device):
     """Training iteration for ActionFormer model"""
@@ -69,13 +132,12 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
         # Forward pass
         class_preds, regr_preds = model(batch["input_features"])
         
-        # Calculate classification loss (cross-entropy)
+        # Calculate classification loss (focal loss) #TODO
         class_loss = nn.CrossEntropyLoss()(class_preds.view(-1, class_preds.size(-1)), 
                                           batch["labels"].view(-1))
         
-        # Calculate regression loss (MSE for onset/offset)
-        # You might need to adapt this based on your label format
-        regr_loss = nn.MSELoss()(regr_preds, torch.zeros_like(regr_preds))  # Placeholder
+        # Calculate regression loss (dIoU) #TODO
+        regr_loss = nn.MSELoss()(regr_preds, torch.zeros_like(regr_preds))  
         
         # Total loss
         total_loss = class_loss + 0.1 * regr_loss  # Weight the losses
@@ -101,7 +163,7 @@ def actionformer_validation_loss(model, val_dataloader, device):
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 class_preds, regr_preds = model(batch["input_features"])
                 
-                # Calculate losses (same as training)
+                # Calculate losses (same as training) #TODO
                 class_loss = nn.CrossEntropyLoss()(class_preds.view(-1, class_preds.size(-1)), 
                                                   batch["labels"].view(-1))
                 regr_loss = nn.MSELoss()(regr_preds, torch.zeros_like(regr_preds))  # Placeholder
