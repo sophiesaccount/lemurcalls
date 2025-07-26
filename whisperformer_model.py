@@ -21,7 +21,7 @@ class ClassificationHead(nn.Module):
         self.norm2 = nn.LayerNorm(input_dim)
         self.conv3 = nn.Conv1d(input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1)
 
-    def forward(self, x):  # x: (B, T, D)
+    def forward(self, x):  # x: (B, T, D)=(batch_size, sequence_length, hidden_size)
         x = x.transpose(1, 2)  # (B, D, T)
         x = self.conv1(x).transpose(1, 2)  # (B, T, D)
         x = self.norm1(x).transpose(1, 2)  # (B, D, T)
@@ -56,13 +56,13 @@ class RegressionHead(nn.Module):
         x = self.norm2(x).transpose(1, 2)
         x = torch.relu(x)
 
-        x = self.conv3(x)                   # → (B, 2, T)  häää hier müsste auch noch je Klasse sein!!
+        x = self.conv3(x)                   # → (B, 2, T) 
         x = torch.relu(x)                   # ReLU for positive distances
         return x.transpose(1, 2)            # → (B, T, 2)
 
 
 # 4. Gesamtmodell: Encoder + Heads
-class WhisperActionFormer(nn.Module):
+class WhisperFormer(nn.Module):
     def __init__(self, encoder, num_classes=NUM_CLASSES):
         super().__init__()
         self.encoder = encoder
@@ -74,7 +74,7 @@ class WhisperActionFormer(nn.Module):
         input_features: dict from Whisper feature extractor or embedded tokens
         Should have shape (B, T, D)
         """
-        encoder_outputs = self.encoder(input_features)
+        encoder_outputs = self.encoder(input_features) #not a tensor, but a model output
         hidden_states = encoder_outputs.last_hidden_state  # (B, T, D)
 
         class_preds = self.class_head(hidden_states)  # (B, T, C)
