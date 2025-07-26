@@ -28,9 +28,9 @@ from torch.nn.utils.rnn import pad_sequence
 def collate_fn(batch):
     # batch is a list of samples (dicts)
     
-    input_features = [torch.tensor(item["input_features"], dtype=torch.float32) for item in batch]
-    decoder_input_ids = [torch.tensor(item["decoder_input_ids"], dtype=torch.int64) for item in batch]
-    labels = [torch.tensor(item["labels"], dtype=torch.int64) for item in batch]
+    input_features = [item["input_features"].clone().detach().float() for item in batch]
+    decoder_input_ids = [item["decoder_input_ids"].clone().detach().long() for item in batch]
+    labels = [item["labels"].clone().detach().long() for item in batch]
 
     # Stack tensors along the first dimension (batch dimension)
     input_features = torch.stack(input_features)
