@@ -16,8 +16,8 @@ from utils import get_lr, create_if_not_exists
 from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data, slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model
-from actionformermodel import WhisperFormer 
-from actionformer_dataset import WhisperFormerDataset
+from whisperformer_model import WhisperFormer 
+from whisperformer_dataset import WhisperFormerDataset
 from convert_hf_to_ct2 import convert_hf_to_ct2
 from util.common import EarlyStopHandler
 from training_utils import collate_fn, train_iteration, evaluate
@@ -32,7 +32,7 @@ def load_actionformer_model(initial_model_path, num_classes):
     encoder = whisper_model.encoder
     
     # Create ActionFormer model with the correct number of classes
-    model = WhisperActionFormer(encoder, num_classes=num_classes)
+    model = WhisperFormer(encoder, num_classes=num_classes)
     
     # Load pretrained weights if available
     if initial_model_path and os.path.exists(initial_model_path):
