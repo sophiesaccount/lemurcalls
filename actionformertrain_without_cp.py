@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 import wandb
 
@@ -56,17 +57,34 @@ def main(args):
     if args.max_num_iterations is None:
         args.max_num_iterations = len(dataloader) * args.max_num_epochs
 
-    total_steps = len(dataloader) * args.max_num_epochs
-    scheduler = get_linear_schedule_with_warmup(optimizer, args.warmup_steps, total_steps)
+    # Use ReduceLROnPlateau scheduler instead of linear warmup
+    if args.val_ratio > 0:
+        scheduler = ReduceLROnPlateau(
+            optimizer, 
+            mode='max',  # Monitor validation score (higher is better)
+            factor=0.5,  # Reduce LR by half when plateauing
+            patience=2,  # Wait 2 epochs before reducing LR
+            verbose=True,
+            min_lr=1e-8  # Minimum learning rate
+        )
+    else:
+        # Fallback to linear warmup if no validation set
+        total_steps = len(dataloader) * args.max_num_epochs
+        scheduler = get_linear_schedule_with_warmup(optimizer, args.warmup_steps, total_steps)
+
+    # Early stopping handler
+    early_stop_handler = EarlyStopHandler(patience=args.patience)
+    val_scores = []
 
     current_step = 0
     training_losses = []
+    best_val_score = 0
 
     for epoch in range(args.max_num_epochs):
         model.train()
         training_losses = []
         for batch in tqdm(dataloader, desc=f"Epoch {epoch}"):
-            loss = train_iteration(model, batch, optimizer, scheduler, scaler, device)
+            loss = train_iteration(model, batch, optimizer, None, scaler, device)  # Pass None for scheduler since we handle it manually
             print(loss)
             training_losses.append(loss)
             current_step += 1
@@ -83,17 +101,36 @@ def main(args):
             if current_step >= args.max_num_iterations:
                 break
 
+        # Validation and learning rate scheduling
         if args.validate_every and args.val_ratio > 0 and current_step % args.validate_every == 0:
             model.eval()
             eval_res = evaluate(val_audio, val_label, segmenter, args.batch_size, args.max_length,
                                 num_trials=1, consolidation_method=None, num_beams=1)
             val_score = (eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1]) * 0.5
+            val_scores.append(val_score)
+            
             wandb.log({
                 "current_step": current_step,
                 "validate/segment_score": eval_res["segment_wise"][-1],
                 "validate/frame_score": eval_res["frame_wise"][-1],
                 "validate/score": val_score
             })
+            
+            # Update learning rate scheduler
+            scheduler.step(val_score)
+            
+            # Early stopping check
+            if early_stop_handler.check(val_score):
+                print(f"Early stopping triggered after {epoch + 1} epochs")
+                break
+                
+            # Save best model
+            if val_score > best_val_score:
+                best_val_score = val_score
+                best_model_path = f"{args.model_folder}/best_model"
+                save_model(model, tokenizer, current_step, best_model_path, max_to_keep=1)
+                print(f"New best validation score: {best_val_score:.4f}")
+            
             model.train()
 
         if current_step >= args.max_num_iterations:
@@ -142,6 +179,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_num_epochs", type=int, default=3)
     parser.add_argument("--max_num_iterations", type=int, default=None)
     parser.add_argument("--val_ratio", type=float, default=0.0)
+    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
     parser.add_argument("--max_length", type=int, default=100)
     parser.add_argument("--total_spec_columns", type=int, default=1000)
     parser.add_argument("--batch_size", type=int, default=4)

@@ -20,6 +20,7 @@ from convert_hf_to_ct2 import convert_hf_to_ct2
 from util.common import EarlyStopHandler
 from training_utils import collate_fn, train_iteration, evaluate
 
+
 def main(args):
     wandb.init(project=args.project, name=args.run_name, notes=args.run_notes, tags=args.run_tags)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,6 +56,9 @@ def main(args):
 
     if args.val_ratio > 0:
         (audio_list, label_list), (val_audio, val_label) = train_val_split(audio_list, label_list, args.val_ratio)
+        print(f"Created validation set with {len(val_audio)} samples (val_ratio = {args.val_ratio})")
+    else:
+        print(f"No validation set created (val_ratio = {args.val_ratio})")
 
     audio_list, label_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
     dataset = VocalSegDataset(audio_list, label_list, tokenizer, args.max_length,
@@ -65,13 +69,18 @@ def main(args):
     if args.max_num_iterations is None:
         args.max_num_iterations = len(dataloader) * args.max_num_epochs
 
+    print(f"Training for {args.max_num_epochs} epochs with val_ratio = {args.val_ratio}")
+    print(f"Validation will run: {'YES' if args.val_ratio > 0 else 'NO'}")
+
     #total_steps = len(dataloader) * args.max_num_epochs
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=4, min_lr=1e-10)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=1, min_lr=1e-12)
 
     current_step = 0
     training_losses = []
+    val_losses = []  # Store validation losses
 
     for epoch in range(args.max_num_epochs):
+        print(f"\n=== Starting Epoch {epoch} ===")
         model.train()
         training_losses = []
         for batch in tqdm(dataloader, desc=f"Epoch {epoch}"):
@@ -92,22 +101,62 @@ def main(args):
             if current_step >= args.max_num_iterations:
                 break
 
-        if args.validate_every and args.val_ratio > 0 and current_step % args.validate_every == 0:
+        print(f"=== End of Epoch {epoch} ===")
+        print(f"val_ratio = {args.val_ratio}, will run validation: {args.val_ratio > 0}")
+        
+        # Validation at the end of each epoch
+        if args.val_ratio > 0:
+            print(f"Running validation for epoch {epoch}...")
             model.eval()
-            eval_res = evaluate(val_audio, val_label, segmenter, args.batch_size, args.max_length,
-                                num_trials=1, consolidation_method=None, num_beams=1)
-            val_score = (eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1]) * 0.5
-            print(val_score)
+            
+            # Compute task-specific validation metrics
+            #eval_res = evaluate(val_audio, val_label, segmenter, args.batch_size, args.max_length,
+            #                    num_trials=1, consolidation_method=None, num_beams=1)
+            #val_score = (eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1]) * 0.5
+            #val_loss = 1 - val_score  # Convert F1 score to loss (1 - F1)
+            
+            # Optionally compute training-style validation loss
+            val_training_loss = 0.0
+            val_batch_count = 0
+            with torch.no_grad():
+                # Create validation dataloader for training-style loss
+                val_dataset = VocalSegDataset(val_audio, val_label, tokenizer, args.max_length,
+                                              args.total_spec_columns, model.module.config.species_codebook)
+                val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
+                                            num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
+                
+                for val_batch in val_dataloader:
+                    for key in val_batch:
+                        val_batch[key] = val_batch[key].to(device)
+                    
+                    with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                        model_out = model(**val_batch)
+                        batch_loss = model_out.loss.mean()
+                        val_training_loss += batch_loss.item()
+                        val_batch_count += 1
+            
+            if val_batch_count > 0:
+                val_training_loss /= val_batch_count
+            
+            val_losses.append(val_training_loss)
+            #print(f"Epoch {epoch}: Validation Score = {val_score:.4f}, Validation Loss = {val_loss:.4f}, Training-style Val Loss = {val_training_loss:.4f}")
+            print(f"Epoch {epoch}: Training-style Val Loss = {val_training_loss:.4f}")
+
             wandb.log({
                 "current_step": current_step,
-                "validate/segment_score": eval_res["segment_wise"][-1],
-                "validate/frame_score": eval_res["frame_wise"][-1],
-                "validate/score": val_score
+                #"validate/segment_score": eval_res["segment_wise"][-1],
+                #"validate/frame_score": eval_res["frame_wise"][-1],
+                #"validate/score": val_score,
+                #"validate/loss": val_loss,
+                "validate/training_loss": val_training_loss
             })
-            scheduler.step(eval_res["segment_wise"][-1])  # Update the learning rate based on the validation score
             model.train()
-
-        #scheduler.step(eval_res["segment_wise"][-1])  # Update the learning rate based on the validation score
+            
+            # Update scheduler with validation loss (you can choose which one to use)
+            scheduler.step(val_training_loss)  # or scheduler.step(val_training_loss)
+            print(f"Current learning rate: {get_lr(optimizer)[0]:.2e}")
+        else:
+            print(f"No validation set (val_ratio = {args.val_ratio})")
 
         if current_step >= args.max_num_iterations:
             break
@@ -159,7 +208,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate_every", type=int, default=50)
     parser.add_argument("--max_num_epochs", type=int, default=3)
     parser.add_argument("--max_num_iterations", type=int, default=None)
-    parser.add_argument("--val_ratio", type=float, default=0.0)
+    parser.add_argument("--val_ratio", type=float, default=0.1)
     parser.add_argument("--max_length", type=int, default=100)
     parser.add_argument("--total_spec_columns", type=int, default=1000)
     parser.add_argument("--batch_size", type=int, default=4)
