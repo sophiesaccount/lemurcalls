@@ -114,6 +114,9 @@ def load_data(audio_path_list, label_path_list, cluster_codebook = None, n_threa
     return audio_list, label_list
 
 def split_audio_and_label( audio, label, split_ratio ):
+    """Splits an audio signal and its labels into two parts based on a given ratio, 
+    adjusting event times and discarding segments shorter than 0.1 seconds."""
+
     num_samples_in_audio = len(audio)
     split_point = int( num_samples_in_audio * split_ratio )
     split_time = split_point / label["sr"] 
@@ -177,6 +180,9 @@ def train_val_split( audio_list, label_list, val_ratio ):
     return (audio_list_train, label_list_train), ( audio_list_val, label_list_val )
 
 def slice_audio_and_label( audio, label, total_spec_columns ):
+    """Slices audio into overlapping clips with left-padding context, adjusts corresponding labels, 
+    and returns aligned audio-label pairs for each clip."""
+
     sr = label["sr"]
     clip_duration = total_spec_columns * label["spec_time_step"]
     
@@ -220,6 +226,9 @@ def slice_audio_and_label( audio, label, total_spec_columns ):
     return audio_clip_list, label_clip_list
 
 def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
+    """Applies slice_audio_and_label to a list of audio-label pairs and 
+    returns combined lists of all sliced clips and their corresponding labels."""
+
     sliced_audio_list, sliced_label_list = [], []
     for audio, label in zip( audio_list, label_list):
         sliced_audios, sliced_labels = slice_audio_and_label( audio, label, total_spec_columns )
@@ -229,6 +238,8 @@ def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
     
     return sliced_audio_list, sliced_label_list
 
+
+#for WhisperSeg not WhisperFormer
 class VocalSegDataset(Dataset):
     def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, species_codebook ):
         self.audio_list = audio_list
