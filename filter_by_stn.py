@@ -28,7 +28,7 @@ clusters = labels["cluster"]
 
 
 
-def calculate_snr(audio, sr, onset, offset, noise_window=0.1, noise_gap=0.1):
+def calculate_snr(audio, sr, onset, offset, noise_window=0.1, noise_gap=0.01):
     """
     audio: full audio array
     sr: sample rate
