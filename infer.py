@@ -38,6 +38,12 @@ def infer(data_dir: str, model_path: str, output_dir: str, min_frequency: int, s
         num_trials (int): Number of trials
     """
     segmenter = WhisperSegmenterFast(model_path, device="cuda")
+    print("Model loaded successfully.")
+
+    
+    files = list(Path(data_dir).rglob('*.wav'))
+    print(f"Found {len(files)} wav files in: {data_dir}")
+    
     for i, p in enumerate(Path(data_dir).rglob('*.wav')):
         logging.info(f"Current file: [{i:>3}] {p}")
         
