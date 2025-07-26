@@ -233,8 +233,28 @@ if __name__ == "__main__":
 
     audio_list_train, label_list_train = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
 
+    # Check if we have any data after slicing
+    if len(audio_list_train) == 0:
+        print("Error: No valid audio samples after slicing!")
+        print("This could be due to:")
+        print("  - Audio files that are too short after slicing")
+        print("  - No valid segments in the labels")
+        print("  - All segments being filtered out during processing")
+        sys.exit(1)
+
+    print(f"Created {len(audio_list_train)} training samples after slicing")
+
     training_dataset = VocalSegDataset( audio_list_train, label_list_train, tokenizer, args.max_length, 
                                          args.total_spec_columns, model.module.config.species_codebook  )
+
+    # Check dataset size before creating DataLoader
+    if len(training_dataset) == 0:
+        print("Error: Training dataset has 0 samples!")
+        sys.exit(1)
+    
+    if len(training_dataset) < args.batch_size:
+        print(f"Warning: Dataset size ({len(training_dataset)}) is smaller than batch size ({args.batch_size})")
+        print("Consider reducing batch size or adding more data")
 
     training_dataloader = DataLoader( training_dataset, batch_size = args.batch_size , shuffle = True , 
                                              worker_init_fn = lambda x:[np.random.seed( epoch  + x ),  
