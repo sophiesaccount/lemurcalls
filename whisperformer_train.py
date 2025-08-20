@@ -31,50 +31,27 @@ from whisperformer_model import WhisperFormer
 from losses import sigmoid_focal_loss, ctr_diou_loss_1d
 
 
-def losses(
-    self,
-    out_cls_logits, out_offsets,
-    gt_cls_labels, gt_offsets
-):
-    # fpn_masks, out_*: F (List) [B, T_i, C]
-    # gt_* : B (list) [F T, C]
-    # fpn_masks -> (B, FT)
+def losses(out_cls, out_offsets, gt_cls_labels, gt_offsets):
 
-    # 1. classification loss
-    # stack the list -> (B, FT) -> (# Valid, )
-    gt_cls = gt_cls_labels
-    pos_mask = gt_cls.sum(-1) > 0
+    #get positive mask: points with true positives
+    pos_mask = gt_cls > 0
 
-    # cat the predicted offsets -> (B, FT, 2 (xC)) -> # (#Pos, 2 (xC))
-    pred_offsets = torch.cat(out_offsets, dim=1)[pos_mask]
-    gt_offsets = torch.stack(gt_offsets)[pos_mask]
-
-    # update the loss normalizer
+    # update the loss normalizer #ToDo: problem that we now have offsets for all classes?
     num_pos = pos_mask.sum().item()
     self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
         1 - self.loss_normalizer_momentum
     ) * max(num_pos, 1)
 
-    # gt_cls is already one hot encoded now, simply masking out
-    gt_target = gt_cls
-
     # focal loss
-    cls_loss = sigmoid_focal_loss(out_cls_logits
-        gt_target,
-        reduction='sum'
-    )
+    cls_loss = sigmoid_focal_loss(out_cls, gt_target, reduction='sum')
     cls_loss /= self.loss_normalizer
-
-    # 2. regression using IoU/GIoU loss (defined on positive samples)
+    
+    # if there are no positive samples, set regression loss to zero
     if num_pos == 0:
         reg_loss = 0 * pred_offsets.sum()
     else:
         # giou loss defined on positive samples
-        reg_loss = ctr_diou_loss_1d(
-            pred_offsets,
-            gt_offsets,
-            reduction='sum'
-        )
+        reg_loss = ctr_diou_loss_1d(pred_offsets[pos_mask], gt_offsets[pos_mask], reduction='sum')
         reg_loss /= self.loss_normalizer
 
     if self.train_loss_weight > 0:
@@ -87,6 +64,7 @@ def losses(
     return {'cls_loss'   : cls_loss,
             'reg_loss'   : reg_loss,
             'final_loss' : final_loss}
+
 
 
 def load_actionformer_model(initial_model_path, num_classes):
@@ -123,12 +101,16 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
 
         
         # Calculate losses
-        #cls_loss, reg_loss, total_loss = losses(fpn_masks, out_cls_logits, out_offsets, gt_cls_labels, gt_offsets)
-
-        cls_loss = sigmoid_focal_loss(class_preds, batch["clusters"])
+        cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'])
         print(cls_loss)
-        regr_loss = ctr_diou_loss_1d(regr_preds, batch['segments']) #VORSICHT: nur für die valid ones!
-        print(regr_loss)
+        print(reg_loss)
+        print(total_loss)
+
+
+        #cls_loss = sigmoid_focal_loss(class_preds, batch["clusters"])
+        #print(cls_loss)
+        #regr_loss = ctr_diou_loss_1d(regr_preds, batch['segments']) #VORSICHT: nur für die valid ones!
+        #print(regr_loss)
         
         #total_loss += (cls_loss + 0.1 * regr_loss).item()
     
@@ -136,7 +118,7 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
     #scaler.step(optimizer)
     #scaler.update()
     
-    return cls_loss.item()
+    #return cls_loss.item()
 
 
 def actionformer_validation_loss(model, val_dataloader, device):
@@ -432,7 +414,7 @@ if __name__ == "__main__":
             torch.set_printoptions(threshold=torch.inf)
             """sanity-check
             for i in range(4):
-                tensor = batch['clusters'][i,:,:]
+                tensor = batch['segments'][i,:,0]
                 # Toleranz für "nahe Null"
                 tol = 0.1
 
@@ -444,7 +426,7 @@ if __name__ == "__main__":
                     print("Tensor besteht nur aus (nahe) Null-Werten.")
             """
             loss = actionformer_train_iteration(model, batch, optimizer, None, scaler, device)
-            #print(loss)
+            print(loss)
             training_losses.append(loss)
 
 
