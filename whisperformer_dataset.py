@@ -71,25 +71,25 @@ class WhisperFormerDataset(Dataset):
         # Frame-basierte Label-Matrix (mit Gaussians)
         frame_labels = np.zeros((reduced_sequence_length, self.num_classes), dtype=np.float32)
 
-        # Segments: für jede Spektrogrammspalte [t-onset, offset-t] oder Padding (0,0)
-        segments = np.zeros((reduced_sequence_length, 2), dtype=np.float32)
+        # Segments: für jede Klasse eigene Spalte [Δonset, Δoffset]
+        segments = np.zeros((reduced_sequence_length, self.num_classes, 2), dtype=np.float32)
 
         for onset, offset, cluster_id in zip(onset_in_clip, offset_in_clip, cluster_id_in_clip):
             if cluster_id < 0 or cluster_id >= self.num_classes:
                 continue
 
-            # Umrechnen von Sekunden in Spectrogramm Columns (Frames)
+            # Sekunden -> Spektrogramm-Frames
             onset_col = int(np.floor(onset / spec_time_step))
             offset_col = int(np.ceil(offset / spec_time_step))
 
             # Clamping
             onset_col = max(0, min(reduced_sequence_length - 1, onset_col))
-            offset_col = max(0, min(reduced_sequence_length -1, offset_col))
+            offset_col = max(0, min(reduced_sequence_length - 1, offset_col))
 
             # Mittelpunkt als ganzzahliger Frame
             center_frame = (onset_col + offset_col) // 2
 
-            # Reduced Frames
+            # Reduzierte Frames
             onset_red = onset_col // 2
             offset_red = offset_col // 2
             center_red = center_frame // 2
@@ -103,20 +103,25 @@ class WhisperFormerDataset(Dataset):
             frame_update = np.zeros(reduced_sequence_length, dtype=np.float32)
             frame_update[label_frames] = gaussian
 
-            frame_labels[:, cluster_id] = np.maximum(frame_labels[:, cluster_id], frame_update) #handles overlapping calls of same class
-
             # ToDO: CenterSampling für Training (bzw wird probably durch Gaussian ersetzt)!!
-            for t in label_frames:
-                segments[t, 0] = t - onset_red      # Abstand zum Onset
-                segments[t, 1] = offset_red - t     # Abstand zum Offset
+            # Frame-Labels aktualisieren
+            frame_labels[:, cluster_id] = np.maximum(
+                frame_labels[:, cluster_id], frame_update
+            )
 
-        # problem:overlapping calls! 
+            # Segments für diese Klasse eintragen
+            for t in label_frames:
+                segments[t, cluster_id, 0] = t - onset_red     # Abstand zum Onset
+                segments[t, cluster_id, 1] = offset_red - t    # Abstand zum Offset
+
+        # Maske: wo hat Cluster > 0 binary
+        mask = (frame_labels > 0).astype(np.float32)  # (T/2, C)
 
         output = {
-            "input_features": torch.tensor(input_features, dtype=torch.float32), #(F, T)
-            "clusters": torch.tensor(frame_labels, dtype=torch.float32), #(T/2,C)
-            "segments": torch.tensor(segments, dtype=torch.float32),  #(T/2,2)
+            "input_features": torch.tensor(input_features, dtype=torch.float32),  # (F, T)
+            "clusters": torch.tensor(frame_labels, dtype=torch.float32),          # (T/2, C)
+            "segments": torch.tensor(segments, dtype=torch.float32),              # (T/2, C, 2)
+            "mask": torch.tensor(mask, dtype=torch.float32),                      # (T/2, C)
         }
 
         return output
-
