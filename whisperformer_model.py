@@ -4,12 +4,14 @@ from transformers import WhisperModel
 
 
 NUM_CLASSES = 10  # number of classes TODO: make this an input 
-INPUT_DIM = 512   # Whisper encoder hidden size (for small model)
+INPUT_DIM = 384   # Whisper encoder hidden size (for small model)
 KERNEL_SIZE = 3
 
-# 1. Load Whisper Encoder (e.g. Whisper Small)
-whisper_model = WhisperModel.from_pretrained("openai/whisper-small")
+
+# 1. Load Whisper Encoder
+whisper_model = WhisperModel.from_pretrained("openai/whisper-tiny")
 encoder = whisper_model.encoder
+
 
 # 2. Classification Head (similar to ActionFormer) 
 class ClassificationHead(nn.Module):
@@ -21,7 +23,7 @@ class ClassificationHead(nn.Module):
         self.norm2 = nn.LayerNorm(input_dim)
         self.conv3 = nn.Conv1d(input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1)
 
-    def forward(self, x):  # x: (B, T, D)=(batch_size, sequence_length, hidden_size)
+    def forward(self, x):  # x: (B, T, D)=(batch_size, sequence_length, hidden_size)=(4,3000,384?)
         x = x.transpose(1, 2)  # (B, D, T)
         x = self.conv1(x).transpose(1, 2)  # (B, T, D)
         x = self.norm1(x).transpose(1, 2)  # (B, D, T)
@@ -31,12 +33,12 @@ class ClassificationHead(nn.Module):
         x = self.norm2(x).transpose(1, 2)
         x = torch.relu(x)
 
-        x = self.conv3(x)  # (B, num_classes, T)
-        x = torch.sigmoid(x)
-        return x.transpose(1, 2)  # → (B, T, num_classes)
+        x = self.conv3(x)  # (B, num_classes, T) = (B,T,C)
+        x = torch.sigmoid(x) #values between 0 and 1
+        return x.transpose(1, 2)  # → (B, T, C)
 
 
-# 3. Regression Head (wie in ActionFormer)(halt auch nach Klassen!)
+# 3. Regression Head (similar to ActionFormer)
 class RegressionHead(nn.Module):
     def __init__(self, input_dim=INPUT_DIM):
         super().__init__()
@@ -61,7 +63,7 @@ class RegressionHead(nn.Module):
         return x.transpose(1, 2)            # → (B, T, 2)
 
 
-# 4. Gesamtmodell: Encoder + Heads
+# 4.entier model
 class WhisperFormer(nn.Module):
     def __init__(self, encoder, num_classes=NUM_CLASSES):
         super().__init__()
