@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import WhisperModel
 
 
-NUM_CLASSES = 10  # number of classes TODO: make this an input 
+NUM_CLASSES = 2  # number of classes TODO: make this an input 
 INPUT_DIM = 384   # Whisper encoder hidden size (for small model)
 KERNEL_SIZE = 3
 
@@ -40,13 +40,14 @@ class ClassificationHead(nn.Module):
 
 # 3. Regression Head (similar to ActionFormer)
 class RegressionHead(nn.Module):
-    def __init__(self, input_dim=INPUT_DIM):
+    def __init__(self, input_dim=INPUT_DIM, num_classes=NUM_CLASSES):
         super().__init__()
+        self.num_classes = num_classes
         self.conv1 = nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
         self.norm1 = nn.LayerNorm(input_dim)
         self.conv2 = nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
         self.norm2 = nn.LayerNorm(input_dim)
-        self.conv3 = nn.Conv1d(input_dim, 2, kernel_size=KERNEL_SIZE, padding=1)  # Output: (B, 2, T)
+        self.conv3 = nn.Conv1d(input_dim, 2*num_classes, kernel_size=KERNEL_SIZE, padding=1)  # Output: (B, 2, T)
 
     def forward(self, x):  # x: (B, T, D)
         x = x.transpose(1, 2)               # → (B, D, T)
@@ -58,9 +59,14 @@ class RegressionHead(nn.Module):
         x = self.norm2(x).transpose(1, 2)
         x = torch.relu(x)
 
-        x = self.conv3(x)                   # → (B, 2, T) 
-        x = torch.relu(x)                   # ReLU for positive distances
-        return x.transpose(1, 2)            # → (B, T, 2)
+        x = self.conv3(x)                  # → (B, 2*C, T)
+        x = torch.relu(x)
+
+        # reshape to (B, T, C, 2)
+        B, C2, T = x.shape
+        x = x.permute(0, 2, 1)             # → (B, T, 2*C)
+        x = x.view(B, T, self.num_classes, 2)
+        return x
 
 
 # 4.entier model
@@ -69,7 +75,7 @@ class WhisperFormer(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.class_head = ClassificationHead(num_classes=num_classes)
-        self.regr_head = RegressionHead()
+        self.regr_head = RegressionHead(num_classes=num_classes)
 
     def forward(self, input_features):
         """
@@ -80,7 +86,7 @@ class WhisperFormer(nn.Module):
         hidden_states = encoder_outputs.last_hidden_state  # (B, T, D)
 
         class_preds = self.class_head(hidden_states)  # (B, T, C)
-        regr_preds = self.regr_head(hidden_states)    # (B, T, 2)
+        regr_preds = self.regr_head(hidden_states)    # (B, T, C, 2)
 
         return class_preds, regr_preds
 
