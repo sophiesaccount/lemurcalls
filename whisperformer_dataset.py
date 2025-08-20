@@ -4,165 +4,119 @@ from torch.utils.data import Dataset
 import librosa
 import json
 
+from audio_utils import WhisperSegFeatureExtractor
+from util.common import is_scheduled_job
+from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
+
 
 class WhisperFormerDataset(Dataset):
-    """Dataset for ActionFormer model - converts audio to frame-wise classification"""
-    
-    def __init__(self, audio_list, label_list, max_length=100, total_spec_columns=1000):
+    def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, num_classes=2):
         self.audio_list = audio_list
         self.label_list = label_list
+        self.feature_extractor_bank = self.get_feature_extractor_bank(label_list)
+        self.tokenizer = tokenizer
         self.max_length = max_length
         self.total_spec_columns = total_spec_columns
-        
-        # Create feature extractor once
-        from transformers import WhisperFeatureExtractor
-        self.feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small")
-        
-        # Automatically calculate num_classes from labels
-        self.cluster_mapping = self.create_cluster_mapping()
-        self.num_classes = len(self.cluster_mapping)
-        print(f"Found {self.num_classes} different clusters: {list(self.cluster_mapping.keys())}")
-        
-    def create_cluster_mapping(self):
-        """Create mapping from cluster names to class IDs by analyzing all labels"""
-        unique_clusters = set()
-        
-        # Collect all unique cluster names from all labels
-        for label in self.label_list:
-            if "segments" in label:
-                # New format with segments list
-                segments = label.get("segments", [])
-                for segment in segments:
-                    cluster = segment.get("cluster", "unknown")
-                    unique_clusters.add(cluster)
-            elif "cluster" in label:
-                # Old format with arrays (from load_data)
-                clusters = label.get("cluster", [])
-                for cluster in clusters:
-                    unique_clusters.add(cluster)
-            else:
-                print(f"Warning: Unknown label format. Label keys: {list(label.keys())}")
-        
-        print(f"Found unique clusters in labels: {sorted(list(unique_clusters))}")
-        
-        # Create mapping (background = 0, others = 1, 2, 3, ...)
-        cluster_mapping = {"background": 0}  # Background is always class 0
-        
-        # Sort clusters for consistent ordering
-        sorted_clusters = sorted(list(unique_clusters))
-        for i, cluster in enumerate(sorted_clusters):
-            if cluster != "background":
-                cluster_mapping[cluster] = i + 1  # Start from 1, since 0 is background
-        
-        print(f"Created cluster mapping: {cluster_mapping}")
-        return cluster_mapping
-        
+        self.num_classes = num_classes
+
+    def get_feature_extractor_bank(self, label_list):
+        feature_extractor_bank = {}
+        for label in label_list:
+            key = "%s-%s-%s" % (str(label["sr"]), str(label["spec_time_step"]), str(label["min_frequency"]))
+            if key not in feature_extractor_bank:
+                feature_extractor_bank[key] = WhisperSegFeatureExtractor(
+                    label["sr"], label["spec_time_step"], label["min_frequency"]
+                )
+        return feature_extractor_bank
+
     def __len__(self):
         return len(self.audio_list)
-    
+
     def __getitem__(self, idx):
         audio = self.audio_list[idx]
         label = self.label_list[idx]
-        
-        # Extract Whisper features (same as original)
-        input_features = self.extract_whisper_features(audio, label["sr"])
-        
-        # Convert label segments to frame-wise labels
-        frame_labels = self.segments_to_frame_labels(label, input_features.shape[0])
-        
-        return {
-            "input_features": input_features,
-            "labels": frame_labels
+
+        sr = label["sr"]
+        spec_time_step = label["spec_time_step"]
+        min_frequency = label["min_frequency"]
+        feature_extractor = self.feature_extractor_bank[
+            "%s-%s-%s" % (str(sr), str(spec_time_step), str(min_frequency))
+        ]
+
+        num_samples_in_clip = int(np.round(self.total_spec_columns * spec_time_step * sr))
+        clip_start = np.random.choice(min(num_samples_in_clip + 1, len(audio) - feature_extractor.n_fft + 1))
+        audio_clip = audio[clip_start : clip_start + num_samples_in_clip]
+
+        actual_clip_duration = len(audio_clip) / sr
+        start_time = clip_start / sr
+        end_time = start_time + actual_clip_duration
+
+        intersected_indices = np.logical_and(label["onset"] < end_time, label["offset"] > start_time)
+
+        onset_in_clip = np.maximum(label["onset"][intersected_indices], start_time) - start_time
+        offset_in_clip = np.minimum(label["offset"][intersected_indices], end_time) - start_time
+        cluster_id_in_clip = label["cluster_id"][intersected_indices]
+
+        audio_clip = np.concatenate(
+            [audio_clip, np.zeros(num_samples_in_clip - len(audio_clip))], axis=0
+        ).astype(np.float32)
+
+        input_features = feature_extractor(
+            audio_clip, sampling_rate=sr, padding="do_not_pad"
+        )["input_features"][0]
+
+        sequence_length = self.total_spec_columns
+        reduced_sequence_length = sequence_length // 2
+
+        # Frame-basierte Label-Matrix (mit Gaussians)
+        frame_labels = np.zeros((reduced_sequence_length, self.num_classes), dtype=np.float32)
+
+        # Segments: für jede Spektrogrammspalte [t-onset, offset-t] oder Padding (0,0)
+        segments = np.zeros((reduced_sequence_length, 2), dtype=np.float32)
+
+        for onset, offset, cluster_id in zip(onset_in_clip, offset_in_clip, cluster_id_in_clip):
+            if cluster_id < 0 or cluster_id >= self.num_classes:
+                continue
+
+            # Umrechnen von Sekunden in Spectrogramm Columns (Frames)
+            onset_col = int(np.floor(onset / spec_time_step))
+            offset_col = int(np.ceil(offset / spec_time_step))
+
+            # Clamping
+            onset_col = max(0, min(reduced_sequence_length - 1, onset_col))
+            offset_col = max(0, min(reduced_sequence_length -1, offset_col))
+
+            # Mittelpunkt als ganzzahliger Frame
+            center_frame = (onset_col + offset_col) // 2
+
+            # Reduced Frames
+            onset_red = onset_col // 2
+            offset_red = offset_col // 2
+            center_red = center_frame // 2
+
+            # Frames only inside the Labels
+            label_frames = np.arange(onset_red, offset_red + 1)
+            sigma = max(offset_red - onset_red, 1e-6)
+
+            gaussian = np.exp(-0.5 * ((label_frames - center_red) / sigma) ** 2)
+
+            frame_update = np.zeros(reduced_sequence_length, dtype=np.float32)
+            frame_update[label_frames] = gaussian
+
+            frame_labels[:, cluster_id] = np.maximum(frame_labels[:, cluster_id], frame_update) #handles overlapping calls of same class
+
+            # ToDO: CenterSampling für Training (bzw wird probably durch Gaussian ersetzt)!!
+            for t in label_frames:
+                segments[t, 0] = t - onset_red      # Abstand zum Onset
+                segments[t, 1] = offset_red - t     # Abstand zum Offset
+
+        # problem:overlapping calls! 
+
+        output = {
+            "input_features": torch.tensor(input_features, dtype=torch.float32), #(F, T)
+            "clusters": torch.tensor(frame_labels, dtype=torch.float32), #(T/2,C)
+            "segments": torch.tensor(segments, dtype=torch.float32),  #(T/2,2)
         }
-    
-    def extract_whisper_features(self, audio, sr):
-        """Extract Whisper features from audio"""
-        # Ensure audio is numpy array
-        if isinstance(audio, torch.Tensor):
-            audio = audio.numpy()
-        
-        # Pad or truncate audio to match total_spec_columns
-        target_length = int(self.total_spec_columns * 0.02 * sr)  # 20ms per frame
-        if len(audio) > target_length:
-            audio = audio[:target_length]
-        else:
-            audio = np.pad(audio, (0, target_length - len(audio)))
-        
-        # Extract features without padding (we handle it manually)
-        features = self.feature_extractor(
-            audio, 
-            sampling_rate=sr, 
-            return_tensors="pt",
-            padding=False  # No padding, we handle it ourselves
-        )
-        input_features = features.input_features.squeeze(0)  # Remove batch dimension
-        
-        # Ensure we have the right shape
-        if len(input_features.shape) == 1:
-            input_features = input_features.unsqueeze(0)
-        
-        # Truncate to max_length
-        if input_features.shape[0] > self.max_length:
-            input_features = input_features[:self.max_length]
-        
-        return input_features
-    
-    def segments_to_frame_labels(self, label, num_frames):
-        """Convert segment labels to frame-wise labels"""
-        # Initialize all frames as background (class 0)
-        frame_labels = np.zeros(num_frames, dtype=np.int64)
-        
-        # Handle different label formats
-        if "segments" in label:
-            # New format with segments list
-            segments = label.get("segments", [])
-            for segment in segments:
-                onset = segment.get("onset", 0)
-                offset = segment.get("offset", 0)
-                cluster = segment.get("cluster", "unknown")
-                
-                # Convert time to frame indices
-                onset_frame = int(onset / self.frame_duration)
-                offset_frame = int(offset / self.frame_duration)
-                
-                # Map cluster to class ID
-                class_id = self.cluster_to_class_id(cluster)
-                
-                # Set frames in this segment to the class ID
-                onset_frame = max(0, min(onset_frame, num_frames - 1))
-                offset_frame = max(0, min(offset_frame, num_frames - 1))
-                
-                frame_labels[onset_frame:offset_frame] = class_id
-                
-        elif "onset" in label and "offset" in label and "cluster" in label:
-            # Old format with arrays (from load_data)
-            onsets = label.get("onset", [])
-            offsets = label.get("offset", [])
-            clusters = label.get("cluster", [])
-            
-            # Convert time to frame indices
-            frame_duration = 0.02  # 20ms per frame (Whisper default)
-            
-            for onset, offset, cluster in zip(onsets, offsets, clusters):
-                onset_frame = int(onset / frame_duration)
-                offset_frame = int(offset / frame_duration)
-                
-                # Map cluster to class ID
-                class_id = self.cluster_to_class_id(cluster)
-                
-                # Set frames in this segment to the class ID
-                onset_frame = max(0, min(onset_frame, num_frames - 1))
-                offset_frame = max(0, min(offset_frame, num_frames - 1))
-                
-                frame_labels[onset_frame:offset_frame] = class_id
-        else:
-            print(f"Warning: Unknown label format for sample. Label keys: {list(label.keys())}")
-        
-        return torch.tensor(frame_labels, dtype=torch.long)
-    
-    def cluster_to_class_id(self, cluster):
-        """Map cluster names to class IDs using the automatically created mapping"""
-        if cluster not in self.cluster_mapping:
-            print(f"Warning: Cluster '{cluster}' not found in mapping {self.cluster_mapping}. Using background class 0.")
-            return 0  # Default to background (0)
-        return self.cluster_mapping[cluster] 
+
+        return output
+
