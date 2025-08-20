@@ -7,7 +7,7 @@ def sigmoid_focal_loss(
     targets: torch.Tensor,
     alpha: float = 0.25,
     gamma: float = 2.0,
-    reduction: str = "none",
+    reduction: str = "sum",
 ) -> torch.Tensor:
     """
     Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
@@ -109,7 +109,7 @@ def ctr_giou_loss_1d(
 def ctr_diou_loss_1d(
     input_offsets: torch.Tensor,
     target_offsets: torch.Tensor,
-    reduction: str = 'none',
+    reduction: str = 'sum',
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """
@@ -166,3 +166,5 @@ def ctr_diou_loss_1d(
         loss = loss.sum()
 
     return loss
+
+
