@@ -31,31 +31,32 @@ from whisperformer_model import WhisperFormer
 from losses import sigmoid_focal_loss, ctr_diou_loss_1d
 
 
-def losses(out_cls, out_offsets, gt_cls_labels, gt_offsets):
+def losses(out_cls, out_offsets, gt_cls, gt_offsets, loss_normalizer=200, loss_normalizer_momentum=0.9, train_loss_weight=0):
 
     #get positive mask: points with true positives
     pos_mask = gt_cls > 0
 
     # update the loss normalizer #ToDo: problem that we now have offsets for all classes?
     num_pos = pos_mask.sum().item()
-    self.loss_normalizer = self.loss_normalizer_momentum * self.loss_normalizer + (
-        1 - self.loss_normalizer_momentum
+    # EMA
+    loss_normalizer = loss_normalizer_momentum * loss_normalizer + (
+        1 - loss_normalizer_momentum
     ) * max(num_pos, 1)
 
     # focal loss
-    cls_loss = sigmoid_focal_loss(out_cls, gt_target, reduction='sum')
-    cls_loss /= self.loss_normalizer
+    cls_loss = sigmoid_focal_loss(out_cls, gt_cls, reduction='sum')
+    cls_loss /= loss_normalizer
     
     # if there are no positive samples, set regression loss to zero
     if num_pos == 0:
-        reg_loss = 0 * pred_offsets.sum()
+        reg_loss = 0 * out_offsets.sum()
     else:
         # giou loss defined on positive samples
-        reg_loss = ctr_diou_loss_1d(pred_offsets[pos_mask], gt_offsets[pos_mask], reduction='sum')
-        reg_loss /= self.loss_normalizer
+        reg_loss = ctr_diou_loss_1d(out_offsets[pos_mask], gt_offsets[pos_mask], reduction='sum')
+        reg_loss /= loss_normalizer
 
-    if self.train_loss_weight > 0:
-        loss_weight = self.train_loss_weight
+    if train_loss_weight > 0:
+        loss_weight = train_loss_weight
     else:
         loss_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
 
@@ -101,10 +102,7 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
 
         
         # Calculate losses
-        cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'])
-        print(cls_loss)
-        print(reg_loss)
-        print(total_loss)
+        cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'], loss_normalizer=200, loss_normalizer_momentum=0.9, train_loss_weight=0)
 
 
         #cls_loss = sigmoid_focal_loss(class_preds, batch["clusters"])
@@ -118,7 +116,9 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
     #scaler.step(optimizer)
     #scaler.update()
     
-    #return cls_loss.item()
+    #return total_loss.item()
+    return total_loss
+
 
 
 def actionformer_validation_loss(model, val_dataloader, device):
@@ -136,11 +136,10 @@ def actionformer_validation_loss(model, val_dataloader, device):
                 class_preds, regr_preds = model(batch["input_features"])
                 
                 # Calculate losses (same as training) #TODO
-                cls_loss = sigmoid_focal_loss(class_preds, batch["clusters"]).item()
-                batch_count += 1
+                cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'], loss_normalizer=200, loss_normalizer_momentum=0.9, train_loss_weight=0)
     
     model.train()
-    return cls_loss / batch_count if batch_count > 0 else 0.0
+    return total_loss
 
 
 def collate_fn(batch):
@@ -404,7 +403,7 @@ if __name__ == "__main__":
     early_stop = False
     current_step = 0
 
-    for epoch in range(1):  # This +1 is to ensure current_step can reach args.max_num_iterations
+    for epoch in range(3):  # This +1 is to ensure current_step can reach args.max_num_iterations
         print(f"\n=== Starting Epoch {epoch} ===")
         model.train() 
         training_losses = []
@@ -425,9 +424,8 @@ if __name__ == "__main__":
                 else:
                     print("Tensor besteht nur aus (nahe) Null-Werten.")
             """
-            loss = actionformer_train_iteration(model, batch, optimizer, None, scaler, device)
-            print(loss)
-            training_losses.append(loss)
+            total_loss = actionformer_train_iteration(model, batch, optimizer, None, scaler, device)
+            training_losses.append(total_loss)
 
 
     
