@@ -186,14 +186,16 @@ if __name__ == "__main__":
         classes, onsets, offsets = [], [], []
 
         for seg in segs_sorted:
-            offset_cols = seg["segment_idx"] * args.total_spec_columns
+            # take left-padding into account!
+            offset_cols = seg["segment_idx"] * args.total_spec_columns - args.total_spec_columns
+            offset_cols = max(offset_cols, 0)
             for (start_col, end_col, score) in seg["intervals"]:  # jetzt schon Python-Liste
                 start_sec = (offset_cols + start_col) * sec_per_col
                 end_sec   = (offset_cols + end_col)   * sec_per_col
 
                 classes.append(seg["class"])
-                onsets.append(round(float(start_sec), 3))
-                offsets.append(round(float(end_sec), 3))
+                onsets.append(float(start_sec))
+                offsets.append(float(end_sec))
 
         final_preds[orig_idx] = {
             "onset": onsets,
