@@ -24,47 +24,6 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
     model.eval()
     return model
 
-def run_inference_new(model, dataloader, device):
-    all_class_probs = []
-    all_regr_preds = []
-    all_classes =[]
-
-    #get predictions for each item from the dataloader
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Inference"):
-            for key in batch:
-                batch[key] = batch[key].to(device)
-            
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                threshold = 0.5
-                class_preds, regr_preds = model(batch["input_features"])
-
-                # Convert logits to probabilities
-                class_probs = torch.sigmoid(class_preds)  
-                #class_probs = class_probs.cpu().numpy()
-
-                #caluclate onsets and offsets, here not working because we do not have columns but seconds!
-                (B, T, L) = regr_preds.shape
-                _,_,C = class_probs.shape
-
-                #only keep predictions with prob above threshold
-                for b in range(B):
-                    for c in range(C):
-                        pred_list=[]
-                        for t in range(T):
-                            if class_probs[b,t,c] > threshold: 
-                                pred_list.extend( t - regr_preds[b,t,c,0], t + regr_preds[b,t,c,1]) #list 
-
-                        #soft NMS (nms.py nutzen?) wie handle ich die verschiedenen Klassen??
-                        #erstmal: nur die n höchten scores behalten?
-
-                #anders speichern? liste unpraktisch? vielleicht hier shcon dictonary?
-
-                #wieder zusammensetzen mit majority voting über die overlaps wie in WhisperSeg
-
-                #dictionary ausgeben
-
-    return all_class_probs, all_regr_preds  
 
 
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
@@ -105,12 +64,14 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
         inds = (iou <= iou_threshold).nonzero(as_tuple=False).squeeze(1)
         order = order[inds + 1]
 
-    return intervals[keep]
+    out = intervals[keep]
+    if out.ndim == 1:   # FIX: auch einzelnes Intervall in [1,3] verwandeln
+        out = out.unsqueeze(0)
+    return out
 
 
 
-def run_inference_new(model, dataloader, device):
-    threshold = 0.5
+def run_inference_new(model, dataloader, device, threshold):
     iou_threshold = 0.5
     all_preds = []
 
@@ -141,8 +102,9 @@ def run_inference_new(model, dataloader, device):
                         if len(intervals) > 0:
                             intervals = torch.stack(intervals)  # [N, 3]
                             kept = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                            kept = kept.cpu().tolist()
                         else:
-                            kept = torch.empty((0, 3), device=device)
+                            kept = []
 
                         all_preds.append({
                             "batch": b,
@@ -161,12 +123,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", required=True, help="Path to the .pth trained model")
     parser.add_argument("--audio_folder", required=True)
-    parser.add_argument("--label_folder", required=True)  # Optional if you have labels for scoring
+    parser.add_argument("--label_folder", required=True)  
     parser.add_argument("--output_json", default="inference_results.json")
     parser.add_argument("--max_length", type=int, default=100)
     parser.add_argument("--total_spec_columns", type=int, default=3000)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_classes", type=int, default=2)
+    parser.add_argument("--threshold", type=float, default=0.6)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -180,7 +143,7 @@ if __name__ == "__main__":
     audio_list, label_list = load_data(audio_paths, label_paths, cluster_codebook=cluster_codebook, n_threads=4)
     
     # Slice to fit model spec length
-    audio_list, label_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+    audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
 
     dataset = WhisperFormerDataset(audio_list, label_list, tokenizer=None, 
                                    max_length=args.max_length, total_spec_columns=args.total_spec_columns)
@@ -191,19 +154,56 @@ if __name__ == "__main__":
     model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
 
     # ===== Inference =====
-    all_preds = run_inference_new(model, dataloader, args.device)
-    print(all_preds)
+    all_preds = run_inference_new(model, dataloader, args.device, args.threshold)
 
     #wieder zusammenfügen 
+    from collections import defaultdict
+
+    # Map predictions zurück zu den Original-Audios
+    grouped_preds = defaultdict(list)
+
+    for pred, meta in zip(all_preds, metadata_list):
+        grouped_preds[meta["original_idx"]].append({
+            "segment_idx": meta["segment_idx"],
+            "class": pred["class"],
+            "intervals": pred["intervals"]  
+        })
+
+    # ===== Rekonstruktion in gewünschtem Format =====
+
+    sec_per_col = 0.0025
+    final_preds = {}
+
+    for orig_idx, segs in grouped_preds.items():
+        segs_sorted = sorted(segs, key=lambda x: x["segment_idx"])  
+
+        classes, onsets, offsets = [], [], []
+
+        for seg in segs_sorted:
+            offset_cols = seg["segment_idx"] * args.total_spec_columns
+            for (start_col, end_col, score) in seg["intervals"]:  # jetzt schon Python-Liste
+                start_sec = (offset_cols + start_col) * sec_per_col
+                end_sec   = (offset_cols + end_col)   * sec_per_col
+
+                classes.append(seg["class"])
+                onsets.append(round(float(start_sec), 3))
+                offsets.append(round(float(end_sec), 3))
+
+        final_preds[orig_idx] = {
+            "class": classes,
+            "onsets": onsets,
+            "offsets": offsets
+        }
+        
+    total = sum(len(preds["class"]) for preds in final_preds.values())
+    print(total)
 
 
-    #in richtige form bringen!
+    # ===== Speichern als JSON =====
+    with open(args.output_json, "w") as f:
+        json.dump(final_preds, f, indent=2)
+
+    print(f"Inference complete. Results saved to {args.output_json}")
 
 
-
-
-    # ===== Save results =====
-    #with open(args.output_json, "w") as f:
-    #    json.dump(dict, f, indent=2)
-
-    #print(f"Inference complete. Results saved to {args.output_json}")
+# Es fehlt: Überlappungen und Majority Voting!
