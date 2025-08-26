@@ -12,6 +12,7 @@ from datautils import get_audio_and_label_paths_from_folders, load_data, get_clu
 from datautils import slice_audios_and_labels
 from whisperformer_train import collate_fn  # Reuse collate function from training
 import numpy as np
+from collections import defaultdict
 
 def load_trained_whisperformer(checkpoint_path, num_classes, device):
     """Load the WhisperFormer model with Whisper encoder and trained weights."""
@@ -29,10 +30,9 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
     """
     intervals: Tensor [N, 3] -> (start, end, score)
-              start, end, score können auf GPU liegen
-    iou_threshold: IoU Threshold für Suppression
+    iou_threshold: IoU Threshold for suppression
 
-    returns: Tensor [M, 3] der behaltenen Intervalle
+    returns: Tensor [M, 3] of kept intervals
     """
     if intervals.numel() == 0:
         return intervals.new_zeros((0, 3))
@@ -65,7 +65,7 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
         order = order[inds + 1]
 
     out = intervals[keep]
-    if out.ndim == 1:   # FIX: auch einzelnes Intervall in [1,3] verwandeln
+    if out.ndim == 1:   # turn single interval into [1,3]
         out = out.unsqueeze(0)
     return out
 
@@ -74,6 +74,8 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
 def run_inference_new(model, dataloader, device, threshold):
     iou_threshold = 0.5
     all_preds = []
+    min_duration = 0.001
+    sec_per_col = 0.0025
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Inference"):
@@ -96,8 +98,13 @@ def run_inference_new(model, dataloader, device, threshold):
                                 start = t - regr_preds[b, t, c, 0]
                                 end   = t + regr_preds[b, t, c, 1]
                                 interval = torch.stack([start, end, score])
-                                interval = torch.round(interval * 100) / 100
+                                #interval = torch.round(interval * 100) / 100
                                 intervals.append(interval)
+
+                                # only keep intervals longer than min_duration
+                                #duration_sec = (interval[1] - interval[0]) * sec_per_col
+                                #if duration_sec >= min_duration:
+                                #    intervals.append(interval)
 
                         if len(intervals) > 0:
                             intervals = torch.stack(intervals)  # [N, 3]
@@ -129,18 +136,18 @@ if __name__ == "__main__":
     parser.add_argument("--total_spec_columns", type=int, default=3000)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_classes", type=int, default=2)
-    parser.add_argument("--threshold", type=float, default=0.6)
+    parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     # ===== Data loading =====
     audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
     
-    # Create a dummy cluster codebook
+    # Create a dummy cluster codebook to use load_data
     cluster_codebook = get_cluster_codebook(label_paths, {})
     
     # Load audio + labels
-    audio_list, label_list = load_data(audio_paths, label_paths, cluster_codebook=cluster_codebook, n_threads=4)
+    audio_list, label_list = load_data(audio_paths, label_paths, cluster_codebook=cluster_codebook, n_threads=1)
     
     # Slice to fit model spec length
     audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
@@ -156,8 +163,7 @@ if __name__ == "__main__":
     # ===== Inference =====
     all_preds = run_inference_new(model, dataloader, args.device, args.threshold)
 
-    #wieder zusammenfügen 
-    from collections import defaultdict
+
 
     # Map predictions zurück zu den Original-Audios
     grouped_preds = defaultdict(list)
@@ -169,7 +175,7 @@ if __name__ == "__main__":
             "intervals": pred["intervals"]  
         })
 
-    # ===== Rekonstruktion in gewünschtem Format =====
+    # ===== Reconstruction =====
 
     sec_per_col = 0.0025
     final_preds = {}
@@ -190,16 +196,16 @@ if __name__ == "__main__":
                 offsets.append(round(float(end_sec), 3))
 
         final_preds[orig_idx] = {
-            "class": classes,
-            "onsets": onsets,
-            "offsets": offsets
+            "onset": onsets,
+            "offset": offsets,
+            "cluster": classes
         }
         
-    total = sum(len(preds["class"]) for preds in final_preds.values())
+    total = sum(len(preds["cluster"]) for preds in final_preds.values())
     print(total)
 
 
-    # ===== Speichern als JSON =====
+    # ===== Save as .json =====
     with open(args.output_json, "w") as f:
         json.dump(final_preds, f, indent=2)
 
