@@ -120,11 +120,11 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
     return total_loss
 
 
-
+###FEHLER!!!!#####
 def actionformer_validation_loss(model, val_dataloader, device):
     """Compute validation loss for ActionFormer model"""
     model.eval()
-    total_loss = 0.0
+    total_loss_accum = 0.0
     batch_count = 0
     
     with torch.no_grad():
@@ -132,14 +132,17 @@ def actionformer_validation_loss(model, val_dataloader, device):
             for key in batch:
                 batch[key] = batch[key].to(device)
             
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                class_preds, regr_preds = model(batch["input_features"])
-                
-                # Calculate losses (same as training) #TODO
-                cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'], loss_normalizer=200, loss_normalizer_momentum=0.9, train_loss_weight=0)
-    
+        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            class_preds, regr_preds = model(batch["input_features"])
+            
+            # Calculate losses (same as training) #TODO
+            cls_loss, reg_loss, total_loss = losses(class_preds, regr_preds, batch['clusters'], batch['segments'], loss_normalizer=200, loss_normalizer_momentum=0.9, train_loss_weight=0)
+            
+            total_loss_accum += total_loss
+            batch_count += 1
+
     model.train()
-    return total_loss
+    return total_loss_accum / batch_count
 
 
 def collate_fn(batch):
@@ -252,7 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_per_epoch", type = int, default = 0 )
     parser.add_argument("--max_num_epochs", type = int, default = 3 )
     parser.add_argument("--max_num_iterations", type = int, default = None )
-    parser.add_argument("--val_ratio", type = float, default = 0.0 )
+    parser.add_argument("--val_ratio", type = float, default = 0.2 )
     parser.add_argument("--patience", type = int, default = 10, help="If the validation score does not improve for [patience] epochs, stop training.")
     
     parser.add_argument("--max_length", type = int, default = 100 )
@@ -338,12 +341,14 @@ if __name__ == "__main__":
     segmenter.update_cluster_codebook( cluster_codebook )
 
     audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 20 )
-
+    
+    #ToDo: heißt das ganze files werden als train val genommen?
     if args.val_ratio > 0:
         (audio_list_train, label_list_train), ( audio_list_val, label_list_val ) = train_val_split( audio_list_train, label_list_train, args.val_ratio )
 
     #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
-    audio_list_train, label_list_train = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
+    audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
+    #audio_list_val, label_list_val, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
 
     # Check if we have any data after slicing
     if len(audio_list_train) == 0:
@@ -403,7 +408,7 @@ if __name__ == "__main__":
     early_stop = False
     current_step = 0
 
-    for epoch in range(3):  # This +1 is to ensure current_step can reach args.max_num_iterations
+    for epoch in range(8):  # This +1 is to ensure current_step can reach args.max_num_iterations
         print(f"\n=== Starting Epoch {epoch} ===")
         model.train() 
         training_losses = []
@@ -439,7 +444,7 @@ if __name__ == "__main__":
             # Create validation dataloader
             val_dataset = WhisperFormerDataset(audio_list_val, label_list_val, tokenizer, args.max_length, args.total_spec_columns)
             val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
-                                        num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
+                                        num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False) #eher shuffle = true oder?
             
             # Compute validation loss
             val_training_loss = actionformer_validation_loss(model, val_dataloader, device)
