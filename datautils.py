@@ -238,6 +238,28 @@ def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
     
     return sliced_audio_list, sliced_label_list
 
+def slice_audios_and_labels(audio_list, label_list, total_spec_columns):
+    """
+    Applies slice_audio_and_label to a list of audio-label pairs and 
+    returns combined lists of all sliced clips, their labels, 
+    and metadata to restore original order.
+    """
+    sliced_audio_list, sliced_label_list, metadata_list = [], [], []
+
+    for audio_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
+        sliced_audios, sliced_labels = slice_audio_and_label(audio, label, total_spec_columns)
+
+        for seg_idx, (sa, sl) in enumerate(zip(sliced_audios, sliced_labels)):
+            sliced_audio_list.append(sa)
+            sliced_label_list.append(sl)
+            metadata_list.append({
+                "original_idx": audio_idx,  # von welchem Audio
+                "segment_idx": seg_idx      # an welcher Stelle im Original
+            })
+
+    return sliced_audio_list, sliced_label_list, metadata_list
+
+
 
 #for WhisperSeg not WhisperFormer
 class VocalSegDataset(Dataset):
