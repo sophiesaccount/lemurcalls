@@ -2,7 +2,7 @@ import json
 import argparse
 import numpy as np
 
-def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.2):
+def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.0001):
     """
     Berechnet TP, FP, FN, FC und F1 für gegebene Labels und Predictions.
     labels, predictions: Dicts mit keys 'onset', 'offset', 'cluster' (Listen)
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Berechne Detection-Metriken für Labels und Predictions.")
     parser.add_argument('--labels', required=True, help='Pfad zur Labels-JSON')
     parser.add_argument('--predictions', required=True, help='Pfad zur Predictions-JSON')
-    parser.add_argument('--overlap_tolerance', type=float, default=0.2, help='Mindestüberlappung für Match (default: 0.2)')
+    parser.add_argument('--overlap_tolerance', type=float, default=0.0001, help='Mindestüberlappung für Match (default: 0.2)')
     args = parser.parse_args()
 
     with open(args.labels, 'r') as f:
