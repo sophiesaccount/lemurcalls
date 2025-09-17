@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from audio_utils import WhisperSegFeatureExtractor
+from transformers import WhisperFeatureExtractor
 from util.common import is_scheduled_job
 from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
@@ -59,7 +60,9 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
     
     for audio_path, label_path in tqdm(zip(audio_path_list, label_path_list), desc="load_data", disable=is_scheduled_job(), leave=False):
         label = json.load(open( label_path ))
-        y, _ = librosa.load( audio_path, sr = label["sr"] )
+        y, _ = librosa.load( audio_path, sr = 16000 )
+        y = y.astype(np.float32)
+        label["sr"] = 16000
                 
         local_audio_list.append( y )
 
@@ -114,8 +117,10 @@ def load_data(audio_path_list, label_path_list, cluster_codebook = None, n_threa
     return audio_list, label_list
 
 def split_audio_and_label( audio, label, split_ratio ):
-    """Splits an audio signal and its labels into two parts based on a given ratio, 
-    adjusting event times and discarding segments shorter than 0.1 seconds."""
+    """
+    Splits an audio signal and its labels into two parts based on a given ratio, 
+    adjusting event times and discarding segments shorter than 0.1 seconds.
+    """
 
     num_samples_in_audio = len(audio)
     split_point = int( num_samples_in_audio * split_ratio )
@@ -178,12 +183,14 @@ def train_val_split( audio_list, label_list, val_ratio ):
             label_list_val.append( label_val )
     
     return (audio_list_train, label_list_train), ( audio_list_val, label_list_val )
-
+"""
 def slice_audio_and_label( audio, label, total_spec_columns ):
-    """Slices audio into overlapping clips with left-padding context, adjusts corresponding labels, 
-    and returns aligned audio-label pairs for each clip."""
-
-    sr = label["sr"]
+    
+    Slices audio into overlapping clips with left-padding context, adjusts corresponding labels, 
+    and returns aligned audio-label pairs for each clip.
+    
+    sr = 1600
+    spec_time_step = 0.01
     clip_duration = total_spec_columns * label["spec_time_step"]
     
     num_samples_in_clip = int( np.round( clip_duration * sr ) )
@@ -224,41 +231,153 @@ def slice_audio_and_label( audio, label, total_spec_columns ):
     assert len(audio_clip_list) == len(label_clip_list)
     
     return audio_clip_list, label_clip_list
+"""
+#for majority voting
+def make_trials(audio_list, label_list, total_spec_columns, num_trials=3):
+    """Erzeuge mehrere überlappende Trials (z. B. mit 1/3 versetzt)."""
+    all_audio, all_label, all_meta = [], [], []
+    hop = total_spec_columns // num_trials
+    for trial in range(num_trials):
+        audios, labels, metas = slice_audios_and_labels(
+            audio_list, label_list, total_spec_columns, offset=trial*hop
+        )
+        # Jede Meta-Info bekommt die Trial-ID
+        for m in metas:
+            m["trial"] = trial
+        all_audio.extend(audios)
+        all_label.extend(labels)
+        all_meta.extend(metas)
+    return all_audio, all_label, all_meta
 
-def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
-    """Applies slice_audio_and_label to a list of audio-label pairs and 
-    returns combined lists of all sliced clips and their corresponding labels."""
-
-    sliced_audio_list, sliced_label_list = [], []
-    for audio, label in zip( audio_list, label_list):
-        sliced_audios, sliced_labels = slice_audio_and_label( audio, label, total_spec_columns )
+"""
+def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset_frac=0.0):
     
-        sliced_audio_list += sliced_audios
-        sliced_label_list += sliced_labels
+    Slice audios into overlapping clips with left-padding context.
+    Now supports an offset for multi-trial slicing.
+
+    Args:
+        audio_list: list of np.array audio signals
+        label_list: list of dicts with onset/offset/cluster info
+        total_spec_columns: number of spectrogram columns per clip
+        offset_frac: fraction of clip length to offset the slicing (0.0, 1/3, 2/3)
+
+    Returns:
+        audio_clips, label_clips, metadata
     
-    return sliced_audio_list, sliced_label_list
+    sliced_audios, sliced_labels, metadata = [], [], []
 
-def slice_audios_and_labels(audio_list, label_list, total_spec_columns):
-    """
-    Applies slice_audio_and_label to a list of audio-label pairs and 
-    returns combined lists of all sliced clips, their labels, 
-    and metadata to restore original order.
-    """
-    sliced_audio_list, sliced_label_list, metadata_list = [], [], []
+    for idx, (audio, label) in enumerate(zip(audio_list, label_list)):
+        sr = label["sr"]
+        clip_duration = total_spec_columns * label["spec_time_step"]
+        num_samples_in_clip = int(np.round(clip_duration * sr))
 
-    for audio_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
-        sliced_audios, sliced_labels = slice_audio_and_label(audio, label, total_spec_columns)
+        # left padding
+        padded_audio = np.concatenate([np.zeros(int(num_samples_in_clip/3)), audio], axis=0)
+        padded_label = {
+            "onset": label["onset"] + clip_duration,
+            "offset": label["offset"] + clip_duration,
+            "cluster_id": label["cluster_id"],
+            "cluster": label["cluster"]
+        }
 
-        for seg_idx, (sa, sl) in enumerate(zip(sliced_audios, sliced_labels)):
-            sliced_audio_list.append(sa)
-            sliced_label_list.append(sl)
-            metadata_list.append({
-                "original_idx": audio_idx,  # von welchem Audio
-                "segment_idx": seg_idx      # an welcher Stelle im Original
+        # apply trial offset
+        start_offset_samples = int(offset_frac * num_samples_in_clip)
+        for pos in range(start_offset_samples, len(padded_audio), num_samples_in_clip):
+            audio_clip = padded_audio[pos:pos + 2 * num_samples_in_clip]
+
+            if len(audio_clip) / sr < 0.1:
+                continue
+
+            start_time = pos / sr
+            end_time = (pos + len(audio_clip)) / sr
+
+            intersected = np.logical_and(
+                padded_label["onset"] < end_time,
+                padded_label["offset"] > start_time
+            )
+
+            label_clip = deepcopy(label)
+            label_clip.update({
+                "onset": np.maximum(padded_label["onset"][intersected], start_time) - start_time,
+                "offset": np.minimum(padded_label["offset"][intersected], end_time) - start_time,
+                "cluster_id": padded_label["cluster_id"][intersected],
+                "cluster": [padded_label["cluster"][i] for i in np.argwhere(intersected)[:, 0]]
             })
 
-    return sliced_audio_list, sliced_label_list, metadata_list
+            sliced_audios.append(audio_clip)
+            sliced_labels.append(label_clip)
+            metadata.append({
+                "original_idx": idx,
+                "segment_idx": pos // num_samples_in_clip,
+                "offset_frac": offset_frac
+            })
 
+    return sliced_audios, sliced_labels, metadata
+"""
+
+###vorsicht: ohen left padding!!!!!!
+def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_trials=1):
+    """
+    Slice audios into overlapping segments with different offsets (0, 1/3, 2/3).
+    Returns expanded audio_list, label_list, metadata_list with offset_frac.
+    """
+
+    new_audios, new_labels, new_metadata = [], [], []
+    sec_per_col = 0.01
+    spec_time_step = 0.01
+    total_spec_columns=3000
+
+    for orig_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
+        sr = 16000
+        clip_duration = total_spec_columns * spec_time_step
+        num_samples_in_clip = int(round(clip_duration * sr))
+
+        for trial in range(num_trials):
+            # Versatz in Samples (0, 1/3, 2/3 des Clip)
+            frac = trial / num_trials
+            offset_samples = int(round(frac * num_samples_in_clip))
+
+            start = offset_samples
+            seg_idx = 0
+
+            while start < len(audio):
+                end = start + num_samples_in_clip
+                audio_clip = audio[start:end]
+
+                #if len(audio_clip) < sr * 0.1:  # skip super short
+                #    break
+
+
+                # Labels anpassen: nur Events im Zeitfenster behalten
+                start_time = start / sr
+                end_time = end / sr
+                intersected_indices = np.logical_and(
+                    label["onset"] < end_time, label["offset"] > start_time
+                )
+
+                label_clip = deepcopy(label)
+                label_clip.update({
+                    "onset": np.maximum(label["onset"][intersected_indices], start_time) - start_time,
+                    "offset": np.minimum(label["offset"][intersected_indices], end_time) - start_time,
+                    "cluster_id": label["cluster_id"][intersected_indices],
+                    "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
+                })
+
+                # speichern
+                new_audios.append(audio_clip)
+                new_labels.append(label_clip)
+                new_metadata.append({
+                    "original_idx": orig_idx,
+                    "segment_idx": seg_idx,
+                    "offset_frac": frac,   # tells us in which trial we are, by giving us the offset
+                    "trial_id": trial
+                })
+
+                start += num_samples_in_clip
+                seg_idx += 1
+
+
+    return new_audios, new_labels, new_metadata
 
 
 #for WhisperSeg not WhisperFormer
@@ -277,7 +396,7 @@ class VocalSegDataset(Dataset):
         for label in label_list:
             key = "%s-%s-%s"%( str( label["sr"] ), str(label["spec_time_step"]), str(label["min_frequency"]) )
             if key not in feature_extractor_bank:
-                feature_extractor_bank[key] = WhisperSegFeatureExtractor( label["sr"], label["spec_time_step"], label["min_frequency"] )
+                feature_extractor_bank[key] = WhisperFeatureExtractor( label["sr"], label["spec_time_step"], label["min_frequency"] )
         return feature_extractor_bank
         
     def map_time_to_spec_col_index(self, t, spec_time_step ):
