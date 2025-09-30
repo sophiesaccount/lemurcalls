@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
 
-@torch.jit.script
+#@torch.jit.script
 def sigmoid_focal_loss(
     inputs: torch.Tensor,
     targets: torch.Tensor,
@@ -51,7 +51,7 @@ def sigmoid_focal_loss(
     return loss
 
 
-@torch.jit.script
+#@torch.jit.script
 def ctr_giou_loss_1d(
     input_offsets: torch.Tensor,
     target_offsets: torch.Tensor,
@@ -83,8 +83,10 @@ def ctr_giou_loss_1d(
     assert (input_offsets >= 0.0).all(), "predicted offsets must be non-negative"
     assert (target_offsets >= 0.0).all(), "GT offsets must be non-negative"
 
-    lp, rp = input_offsets[:, 0], input_offsets[:, 1]
-    lg, rg = target_offsets[:, 0], target_offsets[:, 1]
+    lp, rp = input_offsets[0, :], input_offsets[1, :]
+    lg, rg = target_offsets[0, :], target_offsets[1, :]
+    #lp, rp = input_offsets[:, 0], input_offsets[:, 1]
+    #lg, rg = target_offsets[:, 0], target_offsets[:, 1]
 
     # intersection key points
     lkis = torch.min(lp, lg)
@@ -105,7 +107,7 @@ def ctr_giou_loss_1d(
 
     return loss
 
-@torch.jit.script
+#@torch.jit.script
 def ctr_diou_loss_1d(
     input_offsets: torch.Tensor,
     target_offsets: torch.Tensor,
@@ -136,7 +138,9 @@ def ctr_diou_loss_1d(
     # check all 1D events are valid
     assert (input_offsets >= 0.0).all(), "predicted offsets must be non-negative"
     assert (target_offsets >= 0.0).all(), "GT offsets must be non-negative"
-
+    #print(input_offsets.shape)
+    #lp, rp = input_offsets[0, :], input_offsets[1, :]
+    #lg, rg = target_offsets[0, :], target_offsets[1, :]
     lp, rp = input_offsets[:, 0], input_offsets[:, 1]
     lg, rg = target_offsets[:, 0], target_offsets[:, 1]
 
