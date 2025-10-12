@@ -169,10 +169,37 @@ FIXED_CLUSTER_CODEBOOK = {
     "m": 0,   
     "t": 1,   
     "w": 0,   
-    "lt": 2,
-    "o":3,
+    "lt": 1,
     "h":1
 }
+
+FIXED_CLUSTER_CODEBOOK = {
+    "m": 0,   
+    "t": 1,   
+    "w": 0,   
+    "lt": 1,
+    "o":1,
+    "h":1
+}
+
+
+FIXED_CLUSTER_CODEBOOK = {
+    "m": 0,   
+    "t": 0,   
+    "w": 0,   
+    "lt": 0,
+    "o":0,
+    "h":0
+}
+"""
+FIXED_CLUSTER_CODEBOOK = {
+    "vocal": 0,
+    "target": 0
+}
+"""
+
+
+
 
 ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
@@ -200,13 +227,16 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
         onset_arr[ onset_arr < 0 ] = 0
         offset_arr[ offset_arr > len(y)/label["sr"] ] = len(y)/label["sr"]
 
-        label["cluster"] = [ label["cluster"][idx] for idx in np.argwhere(valid_indices)[:,0] ]        
+        label["cluster"] = [ label["cluster"][idx] for idx in np.argwhere(valid_indices)[:,0] ]  
+        label["quality"] = [ label["quality"][idx] for idx in np.argwhere(valid_indices)[:,0] ]       
         cluster_id_arr = np.array( [ cluster_codebook[ str(value) ] for value in label["cluster"] ]  )
+        quality_id_arr = np.array(label["quality"])
         
         label.update( {
             "onset":onset_arr,
             "offset":offset_arr,
-            "cluster_id":cluster_id_arr
+            "cluster_id":cluster_id_arr,
+            "quality": quality_id_arr
         } )
         local_label_list.append( label )
 
@@ -285,6 +315,28 @@ def split_audio_and_label( audio, label, split_ratio ):
     
     return ( audio_part1, label_part1 ), ( audio_part2, label_part2 )
 
+def split_audio_and_label( audio, label, split_ratio ):
+
+    
+    audio
+    label_new = deepcopy( label )
+    label_new.update(
+    {
+        "onset":label["onset"],
+        "offset": np.minimum(label["offset"], split_time ),
+        "cluster_id":label["cluster_id"][intersected_indices_part1],
+        "cluster": [ label["cluster"][idx] for idx in np.argwhere( intersected_indices_part1 )[:,0]  ],
+        "quality": [ label["quality"][idx] for idx in np.argwhere( intersected_indices_part1 )[:,0]  ]
+
+    })
+    ## drop too short audios
+    if len(audio_part1) / label["sr"] < 0.1:
+        audio_part1 = None
+        label_part1 = None
+    
+    return ( audio_part1, label_part1 )
+
+
 def train_val_split( audio_list, label_list, val_ratio ):
     
     audio_list_train = []
@@ -308,55 +360,11 @@ def train_val_split( audio_list, label_list, val_ratio ):
             label_list_val.append( label_val )
     
     return (audio_list_train, label_list_train), ( audio_list_val, label_list_val )
-"""
-def slice_audio_and_label( audio, label, total_spec_columns ):
-    
-    Slices audio into overlapping clips with left-padding context, adjusts corresponding labels, 
-    and returns aligned audio-label pairs for each clip.
-    
-    sr = 1600
-    spec_time_step = 0.01
-    clip_duration = total_spec_columns * label["spec_time_step"]
-    
-    num_samples_in_clip = int( np.round( clip_duration * sr ) )
-    padded_audio = np.concatenate( [ np.zeros( num_samples_in_clip ), audio ], axis = 0 )
-    padded_label = {
-        "onset": label["onset"] + clip_duration,
-        "offset": label["offset"] + clip_duration,
-        "cluster_id": label["cluster_id"],
-        "cluster": label["cluster"]
-    }
-    audio_clip_list = []
-    label_clip_list = []
-    for pos in range( 0, len(padded_audio), num_samples_in_clip ):
-        ## one clip contains 2 x clip_duration: the first clip_duration is the (left) padded audio part, 
-        ## and the second clip_duration is the main audio part
-        audio_clip = padded_audio[ pos:pos + 2 * num_samples_in_clip]  
 
-        ## drop too short audios
-        if len(audio_clip) / sr < 0.1:
-            continue
-        
-        start_time = pos / sr
-        end_time = (pos + len(audio_clip)) / sr
-        
-        intersected_indices = np.logical_and( padded_label["onset"] < end_time, padded_label["offset"] > start_time )
-        label_clip = deepcopy(label)
-        label_clip.update(
-        {
-            "onset": np.maximum(padded_label["onset"][intersected_indices], start_time ) - start_time ,
-            "offset":np.minimum(padded_label["offset"][intersected_indices], end_time ) - start_time ,
-            "cluster_id":padded_label["cluster_id"][intersected_indices],
-            "cluster": [ padded_label["cluster"][idx] for idx in np.argwhere( intersected_indices )[:,0] ]
-        })
-        
-        audio_clip_list.append( audio_clip )
-        label_clip_list.append( label_clip )
-    
-    assert len(audio_clip_list) == len(label_clip_list)
-    
-    return audio_clip_list, label_clip_list
-"""
+
+
+
+
 #for majority voting
 def make_trials(audio_list, label_list, total_spec_columns, num_trials=3):
     """Erzeuge mehrere überlappende Trials (z. B. mit 1/3 versetzt)."""
@@ -374,71 +382,7 @@ def make_trials(audio_list, label_list, total_spec_columns, num_trials=3):
         all_meta.extend(metas)
     return all_audio, all_label, all_meta
 
-"""
-def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset_frac=0.0):
-    
-    Slice audios into overlapping clips with left-padding context.
-    Now supports an offset for multi-trial slicing.
 
-    Args:
-        audio_list: list of np.array audio signals
-        label_list: list of dicts with onset/offset/cluster info
-        total_spec_columns: number of spectrogram columns per clip
-        offset_frac: fraction of clip length to offset the slicing (0.0, 1/3, 2/3)
-
-    Returns:
-        audio_clips, label_clips, metadata
-    
-    sliced_audios, sliced_labels, metadata = [], [], []
-
-    for idx, (audio, label) in enumerate(zip(audio_list, label_list)):
-        sr = label["sr"]
-        clip_duration = total_spec_columns * label["spec_time_step"]
-        num_samples_in_clip = int(np.round(clip_duration * sr))
-
-        # left padding
-        padded_audio = np.concatenate([np.zeros(int(num_samples_in_clip/3)), audio], axis=0)
-        padded_label = {
-            "onset": label["onset"] + clip_duration,
-            "offset": label["offset"] + clip_duration,
-            "cluster_id": label["cluster_id"],
-            "cluster": label["cluster"]
-        }
-
-        # apply trial offset
-        start_offset_samples = int(offset_frac * num_samples_in_clip)
-        for pos in range(start_offset_samples, len(padded_audio), num_samples_in_clip):
-            audio_clip = padded_audio[pos:pos + 2 * num_samples_in_clip]
-
-            if len(audio_clip) / sr < 0.1:
-                continue
-
-            start_time = pos / sr
-            end_time = (pos + len(audio_clip)) / sr
-
-            intersected = np.logical_and(
-                padded_label["onset"] < end_time,
-                padded_label["offset"] > start_time
-            )
-
-            label_clip = deepcopy(label)
-            label_clip.update({
-                "onset": np.maximum(padded_label["onset"][intersected], start_time) - start_time,
-                "offset": np.minimum(padded_label["offset"][intersected], end_time) - start_time,
-                "cluster_id": padded_label["cluster_id"][intersected],
-                "cluster": [padded_label["cluster"][i] for i in np.argwhere(intersected)[:, 0]]
-            })
-
-            sliced_audios.append(audio_clip)
-            sliced_labels.append(label_clip)
-            metadata.append({
-                "original_idx": idx,
-                "segment_idx": pos // num_samples_in_clip,
-                "offset_frac": offset_frac
-            })
-
-    return sliced_audios, sliced_labels, metadata
-"""
 
 ###vorsicht: ohen left padding!!!!!!
 def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_trials=1):
@@ -485,7 +429,8 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
                     "onset": np.maximum(label["onset"][intersected_indices], start_time) - start_time,
                     "offset": np.minimum(label["offset"][intersected_indices], end_time) - start_time,
                     "cluster_id": label["cluster_id"][intersected_indices],
-                    "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
+                    "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
+                    "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
                 })
 
                 # speichern
