@@ -23,14 +23,16 @@ from whisperformer_train import collate_fn, nms_1d_torch, evaluate_detection_met
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.metrics import precision_score, recall_score, f1_score
+import contextlib
+
 
 
 # ==================== MODEL LOADING ====================
 
-def load_trained_whisperformer(checkpoint_path, num_classes, device):
+def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
     whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
     encoder = whisper_model.encoder
-    model = WhisperFormer(encoder, num_classes=num_classes)
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.to(device)
     model.eval()
@@ -157,6 +159,11 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type=float, default=0.1)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--num_decoder_layers", type = int, default = 3)
+    parser.add_argument("--num_head_layers", type = int, default = 2)
+    parser.add_argument("--low_quality_value", type = float, default = 0.5)
+    parser.add_argument("--allowed_qualities", default = [1,2])
+    parser.add_argument("--num_workers", type = int, default = 1 )
     args = parser.parse_args()
 
     # === Zeitgestempelten Unterordner erstellen ===
@@ -176,44 +183,51 @@ if __name__ == "__main__":
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
+    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.device)
     feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
     all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": []}
 
-    for audio_path, label_path in zip(audio_paths, label_paths):
-        print(f"\n===== Processing {os.path.basename(audio_path)} =====")
-        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
-        audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+    audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
+        args.audio_folder, args.label_folder)
 
-        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
-                                collate_fn=collate_fn, drop_last=False)
+    audio_list_val, label_list_val = load_data(audio_path_list_val, label_path_list_val, cluster_codebook = cluster_codebook, n_threads = 1 )
 
-        preds_by_slice = run_inference_new(
-        model=model,
-        dataloader=dataloader,          # muss mit shuffle=False erstellt sein
-        device=args.device,
-        threshold=args.threshold,
-        iou_threshold=args.iou_threshold,
-        metadata_list=metadata_list     # kommt aus slice_audios_and_labels
-        )
+    audio_list_val, label_list_val, metadata_list = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
+    print(f"Created {len(audio_list_val)} validation samples after slicing")
 
-        final_preds = reconstruct_predictions(
-        preds_by_slice=preds_by_slice,
-        total_spec_columns=args.total_spec_columns,
-        ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
-        )
+    # Create validation dataloader
+    val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value)
+    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
+                                    num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
 
-        # Predictions pro Datei speichern
-        base_name = os.path.splitext(os.path.basename(audio_path))[0]
-        json_path = os.path.join(save_dir, f"{base_name}_preds.json")
-        with open(json_path, "w") as f:
-            json.dump(final_preds, f, indent=2)
-        print(f"✅ Predictions saved to {json_path}")
+    preds_by_slice = run_inference_new(
+    model=model,
+    dataloader=val_dataloader,          # muss mit shuffle=False erstellt sein
+    device=args.device,
+    threshold=args.threshold,
+    iou_threshold=args.iou_threshold,
+    metadata_list=metadata_list     # kommt aus slice_audios_and_labels
+    )
 
-        # Labels laden
+    final_preds = reconstruct_predictions(
+    preds_by_slice=preds_by_slice,
+    total_spec_columns=args.total_spec_columns,
+    ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
+    )
+    
+    # Predictions pro Datei speichern
+    base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    json_path = os.path.join(save_dir, f"{base_name}_preds.json")
+    with open(json_path, "w") as f:
+        json.dump(final_preds, f, indent=2)
+    print(f"✅ Predictions saved to {json_path}")
+    
+        #---- get labels for calculation of F1 val score ----#
+    all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
+    # Labels laden
+    for label_path in label_path_list_val:
         with open(label_path, "r") as f:
             labels = json.load(f)
         
@@ -233,28 +247,13 @@ if __name__ == "__main__":
         all_labels["cluster"].extend(labels["cluster"])
         all_labels["quality"].extend(quality_list)
 
-        all_preds_final["onset"].extend(final_preds["onset"])
-        all_preds_final["offset"].extend(final_preds["offset"])
-        all_preds_final["cluster"].extend(final_preds["cluster"])
-        all_preds_final["score"].extend(final_preds["score"])
+    all_preds_final["onset"].extend(final_preds["onset"])
+    all_preds_final["offset"].extend(final_preds["offset"])
+    all_preds_final["cluster"].extend(final_preds["cluster"])
+    all_preds_final["score"].extend(final_preds["score"])
 
-    metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels, all_preds_final, args.overlap_tolerance, allowed_qualities = {1,2})
-    """
-    # compute racll for each quality class
-    quality_classes = sorted(set(all_labels["quality"]))
-    recall_per_quality = {}
+    metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels, all_preds_final, args.overlap_tolerance, allowed_qualities = args.allowed_qualities)
 
-    for q in quality_classes:
-        total_q = sum(1 for qual in all_labels["quality"] if qual == q)
-        missed_q = sum(1 for qual in metrics['fn_qualities'] if qual == q)
-        recall_q = (total_q - missed_q) / total_q if total_q > 0 else 0.0
-        recall_per_quality[q] = recall_q
-
-    from collections import Counter
-
-    # Häufigkeiten der FN-Quality-Klassen
-    fn_quality_counts = Counter(metrics['fn_qualities'])
-    """
     metrics_path = os.path.join(save_dir, "metrics_all_qualities.txt")
 
     with open(metrics_path, "w") as f:
@@ -268,18 +267,7 @@ if __name__ == "__main__":
         f.write(f"Precision: {metrics['precision']:.4f}\n")
         f.write(f"Recall:    {metrics['recall']:.4f}\n")
         f.write(f"F1-Score:  {metrics['f1']:.4f}\n\n")
-        """
-        f.write("Recall pro Quality-Klasse:\n")
-        for q, r in recall_per_quality.items():
-            f.write(f"  {q}: {r:.4f}\n")
 
-        f.write("\nScores der False Positives:\n")
-        f.write(", ".join([f"{s:.3f}" for s in metrics['fp_scores']]) + "\n")
-
-        f.write("\nQuality-Klassen der False Negatives (Häufigkeit):\n")
-        for q, count in fn_quality_counts.items():
-            f.write(f"  Klasse {q}: {count}\n")
-    """
     print(f"✅ Globale Metriken gespeichert unter {metrics_path}")
 
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -320,8 +308,8 @@ if __name__ == "__main__":
                     y_pred.append(pc)
 
     # False Negatives (Labels ohne Match)
-    for l_idx, lc in enumerate(all_labels['cluster']):
-        if l_idx not in matched_labels:
+    for l_idx, (lc, lq) in enumerate(zip(all_labels['cluster'], all_labels['quality'])):
+        if l_idx not in matched_labels and lq != '3':
             y_true.append(lc)
             y_pred.append("None")
 
