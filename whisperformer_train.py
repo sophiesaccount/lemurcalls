@@ -16,7 +16,7 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 from convert_hf_to_ct2 import convert_hf_to_ct2
-from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
+from datautils_old import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
                        slice_audios_and_labels, train_val_split, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER)
 #from model import WhisperSegmenterForEval, load_model, save_model
@@ -34,7 +34,119 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from transformers import WhisperFeatureExtractor
 from sklearn.model_selection import train_test_split
 import copy
+from collections import defaultdict
+import random
 
+SEED = 66100
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+
+def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
+    """
+    Führt Inferenz durch und ordnet jede Vorhersage exakt dem Slice in metadata_list zu.
+    Gibt eine Liste von Einträgen zurück:
+    {
+      "original_idx": int,
+      "segment_idx": int,
+      "preds": [ { "class": c, "intervals": [[start_col, end_col, score], ...] }, ... ]
+    }
+    """
+    preds_by_slice = []
+    slice_idx = 0
+    model.eval()
+
+    with torch.no_grad():
+        for batch in dataloader:
+            # Tensoren auf Device bringen
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(device, non_blocking=True)
+
+            # Autocast nur auf CUDA aktivieren
+            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (hasattr(device, "type") and device.type == "cuda")
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+
+            with autocast_ctx:
+                class_preds, regr_preds = model(batch["input_features"])
+                class_probs = torch.sigmoid(class_preds)
+
+            B, T, C = class_preds.shape
+            for b in range(B):
+                # passendes Slice aus metadata_list holen
+                meta = metadata_list[slice_idx]
+                slice_idx += 1
+
+                preds_per_class = []
+                for c in range(C):
+                    intervals = []
+                    for t in range(T):
+                        score = class_probs[b, t, c]
+                        if float(score) > threshold:
+                            start = t - regr_preds[b, t, 0]
+                            end   = t + regr_preds[b, t, 1]
+                            intervals.append(torch.stack([start, end, score]))
+
+                    if len(intervals) > 0:
+                        intervals = torch.stack(intervals)
+                        intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        intervals = intervals.cpu().tolist()
+                    else:
+                        intervals = []
+
+                    preds_per_class.append({"class": c, "intervals": intervals})
+
+                preds_by_slice.append({
+                    "original_idx": meta["original_idx"],
+                    "segment_idx": meta["segment_idx"],
+                    "preds": preds_per_class
+                })
+
+    # Sanity-Check: Anzahl Slices sollte übereinstimmen
+    assert len(preds_by_slice) == len(metadata_list), (
+        f"Vorhersage-Liste ({len(preds_by_slice)}) ungleich Metadata-Liste ({len(metadata_list)}). "
+        "Prüfen Sie, ob DataLoader shuffle=False ist und die Reihenfolge konsistent ist."
+    )
+
+    return preds_by_slice
+
+
+def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
+    """
+    Rekonstruiert alle Vorhersagen aus Slice-Koordinaten in Datei-Zeitkoordinaten.
+    Gibt ein Dict mit Listen zurück: {"onset": [], "offset": [], "cluster": [], "score": []}
+    """
+    grouped_preds = defaultdict(list)
+    for ps in preds_by_slice:
+        grouped_preds[ps["original_idx"]].append(ps)
+
+    sec_per_col = 0.02
+    cols_per_segment = total_spec_columns // 2  # T entspricht total_spec_columns/2
+
+    all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
+
+    # Über alle Originaldateien iterieren
+    for orig_idx in sorted(grouped_preds.keys()):
+        segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
+        for seg in segs_sorted:
+            offset_cols = seg["segment_idx"] * cols_per_segment
+            for p in seg["preds"]:
+                c = p["class"]
+                for (start_col, end_col, score) in p["intervals"]:
+                    start_sec = (offset_cols + start_col) * sec_per_col
+                    end_sec   = (offset_cols + end_col)   * sec_per_col
+                    all_preds_final["onset"].append(float(start_sec))
+                    all_preds_final["offset"].append(float(end_sec))
+                    # Map Klasse-ID -> Cluster-Label
+                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
+                    all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
+                    all_preds_final["score"].append(float(score))
+
+    return all_preds_final
 
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
     """
@@ -187,7 +299,7 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
     }
 
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = {1,2}):
+def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = [1,2]):
     # Falls Qualitätsfilter gesetzt: GT filtern
 
     label_onsets   = labels['onset']
@@ -197,16 +309,21 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     #print(label_qualities)
 
     if allowed_qualities is not None:
-        # auf Strings normalisieren, damit {1,2} oder {"1","2"} beides funktioniert
-        allowed_str = set(str(q) for q in allowed_qualities)
-        qual_str = np.array([str(q) for q in label_qualities])
-        mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
+        # alles zu int konvertieren (wenn möglich)
+        try:
+            allowed_ints = set(int(q) for q in allowed_qualities)
+            label_ints = np.array([int(float(q)) for q in label_qualities])
+            mask = np.array([q in allowed_ints for q in label_ints], dtype=bool)
+        except ValueError:
+            # fallback auf stringvergleich, falls nicht-numerische Qualitäten vorkommen
+            allowed_str = set(str(q) for q in allowed_qualities)
+            qual_str = np.array([str(q) for q in label_qualities])
+            mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
 
-
-        label_onsets = np.array(label_onsets)[mask]
-        label_offsets = np.array(label_offsets)[mask]
+        label_onsets   = np.array(label_onsets)[mask]
+        label_offsets  = np.array(label_offsets)[mask]
         label_clusters = np.array(label_clusters)[mask]
-        # label_qualities wird danach nicht mehr gebraucht
+
 
     # Predictions laden
     pred_onsets = np.array(predictions['onset'])
@@ -251,49 +368,7 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         'precision': precision, 'recall': recall, 'f1': f1
     }
 
-def losses_val(
-        out_cls_logits,          # [B, T/2, C]
-        out_offsets,             # [B, T/2, 2]
-        gt_cls_labels,           # [B, T/2, C]
-        gt_offsets,               # [B, T/2, 2]
-        train_loss_weight=1,
-        loss_normalizer=200,
-        loss_normalizer_momentum=0.8
-    ):
-    # 1) Shapes check (optional, nützlich beim Debug)
-    B, T, C = out_cls_logits.shape
-    assert gt_cls_labels.shape == (B, T, C)
-    assert out_offsets.shape == (B, T, 2)
-    assert gt_offsets.shape == (B, T, 2)
 
-    # positive positions: irgendeine Klasse vorhanden, nur um center herum, so wie in dataset!
-    pos_mask = gt_offsets.sum(-1) > 0  # [B, T]
-
-    # offsets für positive positions -> [N_pos, 2] 
-    pred_offsets_pos = out_offsets[pos_mask]   # [N_pos, 2]
-    gt_offsets_pos = gt_offsets[pos_mask]      # [N_pos, 2]
-
-
-    num_pos = pos_mask.sum().item() 
-
-
-    cls_loss = sigmoid_focal_loss(out_cls_logits, gt_cls_labels, reduction='sum')/ max(num_pos,1)
-
-    # regression
-    if num_pos == 0:
-        reg_loss = 0.0 * pred_offsets_pos.sum()
-    else:
-        reg_loss = ctr_diou_loss_1d(pred_offsets_pos, gt_offsets_pos, reduction='sum')
-        reg_loss = reg_loss / num_pos
-
-    # balancing
-    if train_loss_weight > 0:
-        loss_weight = train_loss_weight
-    else:
-        loss_weight = cls_loss.detach() / max(reg_loss.item(), 0.01)
-
-    final_loss = cls_loss + reg_loss * loss_weight
-    return cls_loss, reg_loss, final_loss
 
 def losses_val(
         out_cls_logits,          # [B, T/2, C]
@@ -355,16 +430,18 @@ def losses_val(
 
 
 
-def load_actionformer_model(initial_model_path, num_classes):
+def load_actionformer_model(initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
     """Load ActionFormer model with Whisper encoder"""
     from transformers import WhisperModel
     
     # Load Whisper encoder #????this should be part of the model already!
     whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
+    #whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
+
     encoder = whisper_model.encoder
     
     # Create ActionFormer model with the correct number of classes
-    model = WhisperFormer(encoder, num_classes=num_classes, no_decoder = args.no_decoder)
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
     
     # Load pretrained weights if available
     if initial_model_path and os.path.exists(initial_model_path):
@@ -387,6 +464,7 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
             batch[k] = v.to(device, non_blocking=True)
 
     optimizer.zero_grad()
+    torch.cuda.empty_cache()
 
     # Forward in autocast
     #with autocast(dtype=torch.float16, enabled=(device.type == "cuda")):
@@ -465,140 +543,58 @@ def actionformer_validation_loss(model, val_dataloader, device): #NEIN hier ande
     return (sum_loss / max(n_batches, 1), sum_loss_class / max(n_batches, 1), sum_loss_reg / max(n_batches, 1))
 
 
-def run_inference_new(model, dataloader, device, threshold, iou_threshold):
-    all_preds = []
-    all_labels = []   # Ground-truth Labels für jedes Sample mit speichern
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Inference"):
-            # Batch auf GPU
-            for k, v in batch.items():
-                if isinstance(v, torch.Tensor):
-                    batch[k] = v.to(device, non_blocking=True)
-
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                class_preds, regr_preds = model(batch["input_features"])
-                class_probs = torch.sigmoid(class_preds)
-
-            raw_labels = batch["raw_labels"]
-            #print(f'raw_labels: {raw_labels}')
-            B, T, C = class_preds.shape
-
-            for b in range(B):
-                preds_per_sample = []
-                for c in range(C):
-                    intervals = []
-                    for t in range(T):
-                        score = class_probs[b, t, c]
-                        if score > threshold:
-                            start = t - regr_preds[b, t, 0]
-                            end   = t + regr_preds[b, t, 1]
-                            intervals.append(torch.stack([start, end, score]))
-
-                    if intervals:
-                        intervals = torch.stack(intervals)
-                        intervals = nms_1d_torch(intervals, iou_threshold)
-                        intervals = intervals.cpu().tolist()
-
-                    preds_per_sample.append({"class": c, "intervals": intervals})
-
-                all_preds.append(preds_per_sample)
-                #raw_labels[b]["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in raw_labels[b]["cluster"]]
-                #all_labels.append(raw_labels[b])    # Ground-truth des jeweiligen Samples
-                label_copy = copy.deepcopy(raw_labels[b])
-                # Cluster-Mapping anwenden auf die Kopie
-                label_copy["cluster"] = [
-                    ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in label_copy["cluster"]
-                ]
-
-                all_labels.append(label_copy)
-
-    return all_preds, all_labels
 
 
-
-def actionformer_validation_f1_allclasses(model, val_dataloader, device, iou_threshold, threshold):
+def actionformer_validation_f1_allclasses(model, dataloader, device, iou_threshold, threshold, cluster_codebook,total_spec_columns, feature_extractor,
+num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUSTER, overlap_tolerance, allowed_qualities, all_labels):
     was_training = model.training
     model.eval()
+    
+    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": []}
 
-    all_preds, all_labels = run_inference_new(model, val_dataloader, device, threshold, iou_threshold)
-   
-    final_metrics = []
-    final_metrics_m = []   # <--- NEU für Klasse 'm'
+    preds_by_slice = run_inference_new(
+    model=model,
+    dataloader=val_dataloader,          # muss mit shuffle=False erstellt sein
+    device=device,
+    threshold=threshold,
+    iou_threshold=iou_threshold,
+    metadata_list=metadata_list     # kommt aus slice_audios_and_labels
+    )
 
-    for preds, gt in zip(all_preds, all_labels):
-        # Rekonstruiere Predictions pro Sample
-        onsets, offsets, classes, scores = [], [], [], []
-
-        for p in preds:
-            c = p["class"]
-            for (start_col, end_col, score) in p["intervals"]:
-                onsets.append(start_col * 0.02)   
-                offsets.append(end_col * 0.02)
-                classes.append(ID_TO_CLUSTER[c])
-                scores.append(score)
-
-        pred_dict = {
-            "onset": onsets,
-            "offset": offsets,
-            "cluster": classes,
-            "score": scores
-        }
-        # === Metriken für alle Klassen ===
-        metrics_all = evaluate_detection_metrics_with_false_class_qualities(gt, pred_dict, overlap_tolerance=args.overlap_tolerance)
-        final_metrics.append(metrics_all)
-
-        # === Metriken NUR für Klasse 'm' ===
-        gt_m   = filter_by_class_labels(gt, "m")
-        pred_m = filter_by_class(pred_dict, "m")
-        metrics_m = evaluate_detection_metrics_with_false_class_qualities(gt_m, pred_m, args.overlap_tolerance)
-        final_metrics_m.append(metrics_m)
+    final_preds = reconstruct_predictions(
+    preds_by_slice=preds_by_slice,
+    total_spec_columns=total_spec_columns,
+    ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
+    )
 
 
-    # Mittelwert für alle Klassen
-    macro_f1 = np.mean([m['f1'] for m in final_metrics])
-    tp_total = sum(m['tp'] for m in final_metrics)
-    fp_total = sum(m['fp'] for m in final_metrics)
-    fn_total = sum(m['fn'] for m in final_metrics)
-    fc_total = sum(m['fc'] for m in final_metrics)
-    gtp_total = sum(m['gtp'] for m in final_metrics)
-    pp_total = sum(m['pp'] for m in final_metrics)
+    all_preds_final["onset"].extend(final_preds["onset"])
+    all_preds_final["offset"].extend(final_preds["offset"])
+    all_preds_final["cluster"].extend(final_preds["cluster"])
+    all_preds_final["score"].extend(final_preds["score"])
+
+    metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels, all_preds_final, overlap_tolerance, allowed_qualities = allowed_qualities)
+    tp_total = metrics['tp']
+    fp_total = metrics['fp'] 
+    fn_total = metrics['fn'] 
+    fc_total = metrics['fc'] 
+    gtp_total = metrics['gtp']
+    pp_total = metrics['pp'] 
 
     precision = tp_total / (tp_total + fp_total + fc_total) if (tp_total + fp_total + fc_total) > 0 else 0
     recall    = tp_total / (tp_total + fn_total + fc_total) if (tp_total + fn_total + fc_total) > 0 else 0
     f1_all    = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-
-    # === F1 speziell für Klasse 'm' ===
-    tp_m  = sum(m['tp'] for m in final_metrics_m)
-    fp_m  = sum(m['fp'] for m in final_metrics_m)
-    fn_m  = sum(m['fn'] for m in final_metrics_m)
-    fc_m = sum(m['fc'] for m in final_metrics)
-    gtp_m = sum(m['gtp'] for m in final_metrics_m)
-    pp_m = sum(m['pp'] for m in final_metrics_m)
-
-    prec_m = tp_m / (tp_m + fp_m + fc_m) if (tp_m + fp_m + fc_m) > 0 else 0
-    rec_m  = tp_m / (tp_m + fn_m + fc_m) if (tp_m + fn_m + fc_m) > 0 else 0
-    f1_m   = 2 * prec_m * rec_m / (prec_m + rec_m) if (prec_m + rec_m) > 0 else 0
-
     if was_training:
         model.train()
 
     return {
-        "macro_f1": macro_f1,
         "f1": f1_all,
         "precision": precision,
         "recall": recall,
-        "f1_m": f1_m,            # <--- NEU
-        "precision_m": prec_m,   # <--- NEU
-        "recall_m": rec_m,        # <--- NEU
         "tp_total": tp_total,
         "gtp_total": gtp_total,
-        "gtp_m": gtp_m,
-        "pp_total": pp_total,
-        "pp_m": pp_m
-        
+        "pp_total": pp_total      
     }
-
 
 def compute_class_weights_from_label_list(label_list, codebook):
     """
@@ -671,12 +667,15 @@ if __name__ == "__main__":
     parser.add_argument("--make_equal", nargs="+", default = None )
     parser.add_argument("--use_early_stopping", action="store_true",                # Flag ohne Wert → True, wenn angegeben
     help="Aktiviere Early Stopping basierend auf Validierungs-F1.")
+    parser.add_argument("--num_decoder_layers", type = int, default = 3)
+    parser.add_argument("--num_head_layers", type = int, default = 2)
+
 
     parser.add_argument("--patience", type = int, default = 6, help="If the validation score does not improve for [patience] epochs, stop training.")
     parser.add_argument("--total_spec_columns", type = int, default = 3000 )
     parser.add_argument("--batch_size", type = int, default = 4 )
     parser.add_argument("--learning_rate", type = float, default = 1e-4)
-    parser.add_argument("--lr_schedule", default = 'plateau')
+    parser.add_argument("--lr_schedule", default = 'cosine')
     parser.add_argument("--seed", type = int, default = 66100 )
     parser.add_argument("--weight_decay", type = float, default = 0.01 )
     parser.add_argument("--warmup_steps", type = int, default = 100 )
@@ -694,7 +693,9 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type = float, default = 0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
-    
+    parser.add_argument("--low_quality_value", type=float, default=0.5)
+    parser.add_argument("--allowed_qualities", default=[1,2])
+
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -711,7 +712,7 @@ if __name__ == "__main__":
         
     device = torch.device(  "cuda:%d"%( args.gpu_list[0] ) if torch.cuda.is_available() else "cpu" )
 
-    model = load_actionformer_model(args.initial_model_path, args.num_classes)
+    model = load_actionformer_model(args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
     
     if args.freeze_encoder:
         for para in model.encoder.parameters():
@@ -727,7 +728,6 @@ if __name__ == "__main__":
     else:
         audio_path_list_train, label_path_list_train = get_audio_and_label_paths(args.train_dataset_folder)
 
-    #cluster_codebook = get_cluster_codebook( label_path_list_train, initial_cluster_codebook={}, num_classes=args.num_classes, make_equal = args.make_equal)
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
 
     audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 1 )
@@ -749,13 +749,15 @@ if __name__ == "__main__":
     print(f"Created {len(audio_list_train)} training samples after slicing") 
 
     feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
-    
+    #feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
+
+    ### Handle Validation Set ###
     if args.val_ratio > 0:
         audio_list_val, label_list_val, metadata_list = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
         print(f"Created {len(audio_list_val)} validation samples after slicing")
 
         # Create validation dataloader
-        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes)
+        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value)
         val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                         num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False) 
     
@@ -770,9 +772,31 @@ if __name__ == "__main__":
         print(f"Created {len(audio_list_val)} validation samples after slicing")
 
         # Create validation dataloader
-        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes)
+        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value)
         val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
                                         num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
+
+        #---- get labels for calculation of F1 val score ----#
+        all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
+        # Labels laden
+        for label_path in label_path_list_val:
+            with open(label_path, "r") as f:
+                labels = json.load(f)
+            
+            clusters = labels["cluster"]
+            labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
+
+            # Quality-Klassen hinzufügen
+            if "quality" in labels:
+                quality_list = labels["quality"]
+            else:
+                quality_list = ["unknown"] * len(labels["onset"])
+
+            # --- globale Sammler befüllen ---
+            all_labels["onset"].extend(labels["onset"])
+            all_labels["offset"].extend(labels["offset"])
+            all_labels["cluster"].extend(labels["cluster"])
+            all_labels["quality"].extend(quality_list)
 
 
     # Check if we have any data after slicing
@@ -785,7 +809,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
 
-    training_dataset = WhisperFormerDatasetQuality(audio_list_train, label_list_train, args.total_spec_columns, feature_extractor, args.num_classes)
+    training_dataset = WhisperFormerDatasetQuality(audio_list_train, label_list_train, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value)
 
     # Check dataset size before creating DataLoader
     if len(training_dataset) == 0:
@@ -826,7 +850,6 @@ if __name__ == "__main__":
         args.max_num_iterations = len( training_dataloader ) * args.max_num_epochs
                 
 
-    #model = load_actionformer_model(args.initial_model_path, 1)
     model = nn.DataParallel( model, args.gpu_list )
     model = model.to(device)
 
@@ -892,6 +915,7 @@ if __name__ == "__main__":
     best_metrics = {}            # hier speichern wir die besten Scores
 
     best_model_state_dict = model.module.state_dict()  # initial save
+    #best_model_state_dict = model.state_dict()
 
 
     for epoch in range(args.max_num_epochs+1):  
@@ -926,29 +950,30 @@ if __name__ == "__main__":
         print(f"Epoch {epoch}, Step {count}, Epoch Training Loss: {epoch_train_loss:.4f}")
         print(f"val_ratio = {args.val_ratio}, will run validation: {args.val_ratio > 0}")
 
-
+        thresholds = [0.4, 0.5, 0.6]
         # Validation at the end of each epoch
         if args.val_ratio > 0 or args.label_folder_val:
             print(f"Running validation for epoch {epoch}...")
+            f1s, recalls, precisions = [], [], []
+            for threshold in thresholds:
+                
+                results = actionformer_validation_f1_allclasses(model, val_dataloader, device, args.iou_threshold, threshold, cluster_codebook, args.total_spec_columns, feature_extractor,
+                args.num_classes, args.low_quality_value, args.batch_size, args.num_workers, collate_fn, ID_TO_CLUSTER, args.overlap_tolerance, args.allowed_qualities, all_labels)
+                f1 = results["f1"]
+                f1s.append(f1)
+                recall = results["recall"]
+                recalls.append(recall)
+                precision = results["precision"]
+                precisions.append(precision)
 
-            results = actionformer_validation_f1_allclasses(model, val_dataloader, device, iou_threshold=args.iou_threshold, threshold=args.threshold)
-            tps = results["tp_total"]
-            print(f'tp total: {tps}')
-            gtps = results["gtp_total"]
-            print(f'num gt positives: {gtps}')
-            pps = results["pp_total"]
-            print(f'num predicted positives: {pps}')
-            f1 = results["f1"]
-            print(f'f1: {f1}')
-            
-            recall = results["recall"]
-            print(f'recall: {recall}')
-            precision = results["precision"]
-            print(f'precision: {precision}')
-            print(f"Validation F1 (class 'm'):  {results['f1_m']:.4f}")
-            print(f"Recall for class 'm':      {results['recall_m']:.4f}")
-            print(f"Precision for class 'm':   {results['precision_m']:.4f}")
-
+            f1_scores_val.append(f1s)
+            recall_scores_val.append(recalls)
+            precision_scores_val.append(precisions)
+            f1 = np.max(f1s)
+            best_threshold = thresholds[np.argmax(f1s)]
+            precision = precisions[np.argmax(f1s)]
+            recall = recalls[np.argmax(f1s)]
+            print(f"Epoch {epoch}: Val F1 = {f1:.4f} for threshold {best_threshold}")
 
             if args.lr_schedule == "cosine":
                 if epoch >5:
@@ -967,24 +992,18 @@ if __name__ == "__main__":
                     print(f"LR reduced from {old_lr:.2e} to {new_lr:.2e} at epoch {epoch}")
                     lr_reduction_epochs.append((epoch, new_lr))
 
-            f1_scores_val.append(f1)
-            recall_scores_val.append(recall)
-            precision_scores_val.append(precision)
-            print(f"Epoch {epoch}: Val F1 = {f1:.4f}")
 
-
-            #print(f"Current learning rate: {get_lr(optimizer)[0]:.2e}")
-            #lr = get_lr(optimizer)[0]
-            #lrs.append(lr)
 
             if f1 > best_f1:
                 best_f1 = f1
                 best_model_state_dict = copy.deepcopy(model.module.state_dict())
+                #best_model_state_dict = copy.deepcopy(model.state_dict())
                 best_metrics = {
                 "epoch": epoch,
                 "f1": f1,
                 "precision": precision,
-                "recall": recall
+                "recall": recall,
+                "threshold": best_threshold
                     }
             
             if early_stopper is not None:
@@ -1015,11 +1034,11 @@ if __name__ == "__main__":
     plt.plot(train_loss_history, label="Training Loss")
     plt.plot(train_loss_history_class, label="Training Loss Class")
     plt.plot(train_loss_history_reg, label="Training Loss Regression")
-    plt.plot(f1_scores_val, label="Validation F1")
-    plt.plot(f1_scores_val_m, label="Validation F1 Moan")
-    plt.plot(recall_scores_val, label="Validation Recall")
-    plt.plot(precision_scores_val, label="Validation Precision")
-
+    for i in range(len(thresholds)):
+        plt.plot([sublist[i] for sublist in f1_scores_val], label=f"Validation F1 for threshold {thresholds[i]}")
+        #plt.plot(f1_scores_val_m, label="Validation F1 Moan")
+        #plt.plot([sublist[i] for sublist in recall_scores_val], label=f"Validation Recall for threshold {thresholds[i]}")
+        #plt.plot([sublist[i] for sublist in precision_scores_val], label=f"Validation Precision for threshold {thresholds[i]}")
     
     # Vertikale Linien für LR-Reduktionen
     for epoch_idx, lr_val in lr_reduction_epochs:
@@ -1059,7 +1078,7 @@ if __name__ == "__main__":
     # Pfad zur CSV-Datei
     csv_path = os.path.join(args.model_folder, "runs.csv")
 
-
+    
     # Zeitstempel im Format YYYY-MM-DD HH:MM:SS
     run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1089,4 +1108,25 @@ if __name__ == "__main__":
         writer.writerow(row)
 
     print(f"Run wurde in {csv_path} protokolliert.")
+
+    # Pfad zur CSV-Datei
+    csv_path = os.path.join(args.model_folder, "runs.csv")
+
+    # Wenn die Datei noch nicht existiert, Header schreiben
+    file_exists = os.path.isfile(csv_path)
+
+    # Öffne CSV im Append-Modus
+    with open(csv_path, "a", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=list(best_metrics.keys()))
+        
+        if not file_exists:
+            # Header nur schreiben, wenn die Datei neu ist
+            writer.writeheader()
+        
+        # Werte der besten Metrics als neue Zeile eintragen
+        writer.writerow(best_metrics)
+
+    print(f"✅ Best metrics also appended to {csv_path}")
+
+
         
