@@ -15,7 +15,7 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 from convert_hf_to_ct2 import convert_hf_to_ct2
-from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
+from datautils_ben import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
                        slice_audios_and_labels, train_val_split)
 from model import WhisperSegmenterForEval, load_model, save_model
@@ -28,13 +28,13 @@ from torch.nn.utils.rnn import pad_sequence
 def collate_fn(batch):
     # batch is a list of samples (dicts)
     
-    input_features = [item["input_features"].clone().detach().float() for item in batch]
-    decoder_input_ids = [item["decoder_input_ids"].clone().detach().long() for item in batch]
-    labels = [item["labels"].clone().detach().long() for item in batch]
+    #input_features = [item["input_features"].clone().detach().float() for item in batch]
+    #decoder_input_ids = [item["decoder_input_ids"].clone().detach().long() for item in batch]
+    #labels = [item["labels"].clone().detach().long() for item in batch]
 
-    #input_features = [torch.tensor(item["input_features"], dtype=torch.float32) for item in batch]
-    #decoder_input_ids = [torch.tensor(item["decoder_input_ids"], dtype=torch.int64) for item in batch]
-    #labels = [torch.tensor(item["labels"], dtype=torch.int64) for item in batch]
+    input_features = [torch.tensor(item["input_features"], dtype=torch.float32) for item in batch]
+    decoder_input_ids = [torch.tensor(item["decoder_input_ids"], dtype=torch.int64) for item in batch]
+    labels = [torch.tensor(item["labels"], dtype=torch.int64) for item in batch]
 
     # Stack tensors along the first dimension (batch dimension)
     input_features = torch.stack(input_features)
@@ -69,11 +69,11 @@ def evaluate( audio_list, label_list, segmenter, batch_size, max_length, num_tri
 
     for audio, label in tqdm(zip(audio_list, label_list), total = len(audio_list), desc = "evaluate()", disable=is_scheduled_job()):
         prediction = segmenter.segment(
-            audio, sr = label["sr"],
-            min_frequency = label["min_frequency"],
-            spec_time_step = label["spec_time_step"],
-            min_segment_length = label["min_segment_length"],
-            eps = label["eps"],  ## for DBSCAN clustering
+            audio, sr = 48000,
+            min_frequency = 0,
+            spec_time_step = 0.0025,
+            min_segment_length = 0.0195,
+            eps = 0.02,  ## for DBSCAN clustering
             time_per_frame_for_voting = label.get("time_per_frame_for_voting", 0.001), ## for bin-wise voting, by default it is not used
             consolidation_method = consolidation_method,
             max_length = max_length, 
@@ -83,18 +83,18 @@ def evaluate( audio_list, label_list, segmenter, batch_size, max_length, num_tri
         )
         # dirty workaround to pass the job-id in `confusion_matrix` and `save_cm_data
         if confusion_matrix != None:
-            confusion_matrix_framewise(prediction, label, None, label["time_per_frame_for_scoring"], name=confusion_matrix)
+            confusion_matrix_framewise(prediction, label, None, 0.001, name=confusion_matrix)
         if save_cm_data != None:
             with open(f'/usr/users/bhenne/projects/whisperseg/results/{save_cm_data}.cmraw', "w") as fp:
                 json.dump({'prediction': prediction, 'label': label}, fp, indent=2)
-        TP, P_pred, P_label = segmenter.segment_score( prediction, label,  target_cluster = target_cluster, tolerance = label["tolerance"] )[:3]
+        TP, P_pred, P_label = segmenter.segment_score( prediction, label,  target_cluster = target_cluster, tolerance = 0.02 )[:3]
         total_n_true_positive_segment_wise += TP
         total_n_positive_in_prediction_segment_wise += P_pred
         total_n_positive_in_label_segment_wise += P_label
         
         
         TP, P_pred, P_label = segmenter.frame_score( prediction, label,  target_cluster = target_cluster, 
-                                                     time_per_frame_for_scoring = label["time_per_frame_for_scoring"] )[:3]
+                                                     time_per_frame_for_scoring = 0.001 )[:3]
         
         total_n_true_positive_frame_wise += TP
         total_n_positive_in_prediction_frame_wise += P_pred
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_per_epoch", type = int, default = 0 )
     parser.add_argument("--max_num_epochs", type = int, default = 3 )
     parser.add_argument("--max_num_iterations", type = int, default = None )
-    parser.add_argument("--val_ratio", type = float, default = 0.0 )
+    parser.add_argument("--val_ratio", type = float, default = 0.2 )
     parser.add_argument("--patience", type = int, default = 10, help="If the validation score does not improve for [patience] epochs, stop training.")
     
     parser.add_argument("--max_length", type = int, default = 100 )
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
     
     args = parser.parse_args()
-
+    """
     wandb.init(
         project=args.project,
         name=args.run_name,
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     wandb.define_metric( "validate/score", step_metric="current_step")
     wandb.define_metric( "validate/segment_score", step_metric="current_step")
     wandb.define_metric( "validate/frame_score", step_metric="current_step")
-
+    """
     if args.seed is not None:
         np.random.seed(args.seed)  
         
@@ -300,6 +300,7 @@ if __name__ == "__main__":
             current_step += 1
 
             if args.update_every > 0 and current_step % args.update_every == 0:
+                """
                 wandb.log(
                     {
                         "current_step":current_step,
@@ -308,6 +309,7 @@ if __name__ == "__main__":
                         "epoch": epoch + count / len(training_dataloader)
                     }
                 )
+                """
                 
                 training_loss_value_list = [] 
 
@@ -316,6 +318,7 @@ if __name__ == "__main__":
                 model.eval()
                 ## in the validation set, set the num_trails to 1
                 eval_res = evaluate( audio_list_val, label_list_val, segmenter, args.batch_size, args.max_length, num_trials =1, consolidation_method = None, num_beams=1, target_cluster = None )
+                """
                 wandb.log(
                     {
                         "current_step":current_step,
@@ -324,6 +327,7 @@ if __name__ == "__main__":
                         "validate/frame_score": eval_res["frame_wise"][-1]
                     }
                 )    
+                """
                 val_score_history.append( ( current_step, ( eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1] ) * 0.5 ) )
                 early_stop = esh.check(val_score_history[-1][1]) if len(val_score_history) > 0 else False
                 model.train()
