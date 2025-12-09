@@ -37,14 +37,16 @@ def infer(data_dir: str, model_path: str, output_dir: str, min_frequency: int, s
         eps (float): The threshold epsilon_vote during the multi-trial majority voting when processing long audio files
         num_trials (int): Number of trials
     """
-    segmenter = WhisperSegmenterFast(model_path, device="cuda")
+    segmenter = WhisperSegmenterFast(model_path, device="cpu")
     print("Model loaded successfully.")
 
     
-    files = list(Path(data_dir).rglob('*.wav'))
+    #files = list(Path(data_dir).rglob('*.wav'))
+    files = list(Path(data_dir).rglob('*.WAV'))
     print(f"Found {len(files)} wav files in: {data_dir}")
     
-    for i, p in enumerate(Path(data_dir).rglob('*.wav')):
+    #for i, p in enumerate(Path(data_dir).rglob('*.wav')):
+    for i, p in enumerate(Path(data_dir).rglob('*.WAV')):
         logging.info(f"Current file: [{i:>3}] {p}")
         
         sampling_rate = fetch_sr_rounded(p.absolute())
