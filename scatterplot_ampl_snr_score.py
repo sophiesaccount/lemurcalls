@@ -23,6 +23,7 @@ from datautils import (
     ID_TO_CLUSTER
 )
 from whisperformer_train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities
+from whisperformer_infer_trials import soft_nms_1d_torch
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -74,6 +75,123 @@ def compute_snr(y, sr, cutoff=200, order=5):
 
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
+
+    import numpy as np
+
+def compute_snr_timebased(y, sr, start_sample, end_sample):
+    """
+    Berechnet SNR in dB anhand eines Audiosegments und der direkt folgenden "Noise"-Region.
+    
+    Args:
+        y: Audio-Signal (1D numpy array)
+        sr: Samplingrate
+        start_sample: Start des Signal-Segments
+        end_sample: Ende des Signal-Segments
+    
+    Returns:
+        snr_db: SNR in dB
+    """
+    # Signalsegment
+    y_signal = y[start_sample:end_sample]
+
+    # Noise-Segment direkt danach (gleich lang)
+    noise_start = end_sample
+    noise_end = end_sample + (end_sample - start_sample)
+    
+    # Prüfen, dass wir nicht über das Audio hinauslaufen
+    #if noise_end > len(y):
+    #    noise_end = len(y)
+    y_noise = y[noise_start:noise_end]
+    #print(f'noise_start: {noise_end}')
+    #print(f'noise_end: {noise_end}')
+
+    # Falls kein Noise-Segment verfügbar ist, kleine Zahl hinzufügen, um Division durch 0 zu vermeiden
+    #if len(y_noise) == 0:
+    #if noise_end >=16000:
+    #    y_noise = np.array([1e-10])
+    #    print('No Noise Segment found!')
+
+    # Energie (mittlere Leistung)
+    signal_power = np.mean(y_signal ** 2) + 1e-10
+    noise_power = np.mean(y_noise ** 2) + 1e-10
+    #print(f'signal_power: {signal_power}')
+    #print(f'noise_power: {signal_power}')
+
+    snr_db = 10 * np.log10(signal_power / noise_power)
+    #print(f'snr_db: {snr_db}')
+    return snr_db
+
+
+
+from scipy.signal import butter, filtfilt
+import numpy as np
+
+def compute_snr_top200(y, sr, topband_hz=200, order=5):
+    """
+    Berechnet eine einfache Signal-to-Noise-Ratio (SNR) in dB.
+    'Noise'  = Energie in den obersten `topband_hz` Hz (High-Frequency-Anteil)
+    'Signal' = Restenergie unterhalb Nyquist - topband_hz
+    """
+    nyquist = 0.5 * sr
+    cutoff = nyquist - topband_hz  # Grenze zwischen Signal und Noise
+    if cutoff <= 0:
+        raise ValueError("Samplingrate zu niedrig oder topband_hz zu groß!")
+
+    # === Lowpass: Signalanteil unterhalb cutoff ===
+    normal_cutoff = cutoff / nyquist
+    b_low, a_low = butter(order, normal_cutoff, btype='low', analog=False)
+    y_signal = filtfilt(b_low, a_low, y)
+
+    # === Highpass: Noise-Anteil oberhalb cutoff ===
+    b_high, a_high = butter(order, normal_cutoff, btype='high', analog=False)
+    y_noise = filtfilt(b_high, a_high, y)
+
+    # === Leistung (Energie) ===
+    signal_power = np.mean(y_signal ** 2) + 1e-10
+    noise_power = np.mean(y_noise ** 2) + 1e-10
+
+    snr_db = 10 * np.log10(signal_power / noise_power)
+    return snr_db
+
+from scipy.signal import butter, filtfilt
+
+def compute_snr_new(y, sr, cutoff=200, signal_high=1200, order=5):
+    """
+    Berechnet die SNR in dB.
+    Signal = Energie zwischen cutoff und signal_high Hz
+    Noise  = Energie unterhalb cutoff Hz
+    """
+    nyquist = 0.5 * sr
+    
+    # 1️⃣ Noise: Tiefpass unter cutoff
+    normal_cutoff = cutoff / nyquist
+    b, a = butter(order, normal_cutoff, btype='low')
+    y_noise = filtfilt(b, a, y)
+    
+    """
+    # 1️⃣ Noise: Tiefpass unter cutoff
+    low = 100
+    high = cutoff 
+    b, a = butter(order, [low/nyquist, high/nyquist], btype='band')
+
+    y_noise = filtfilt(b, a, y)
+    """
+    
+
+    # 2️⃣ Signal: Bandpass cutoff - signal_high
+    high = min(signal_high, nyquist)  # sicherstellen, dass wir nicht über Nyquist gehen
+    low  = cutoff
+    b, a = butter(order, [low/nyquist, high/nyquist], btype='band')
+    y_signal = filtfilt(b, a, y)
+
+    # Energie (mittlere Leistung)
+    signal_power = np.mean(y_signal**2) + 1e-10
+    noise_power  = np.mean(y_noise**2) + 1e-10
+
+    snr_db = 10 * np.log10(signal_power / noise_power)
+    return snr_db
+
+
 
 def plot_spectrogram_and_scores(
     mel_spec,
@@ -163,7 +281,7 @@ def plot_spectrogram_and_scores(
     save_path = os.path.join(save_dir, save_filename)
     plt.savefig(save_path, dpi=150)
     plt.close()
-    print(f"✅ Segment-Plot gespeichert unter {save_path}")
+    #print(f"✅ Segment-Plot gespeichert unter {save_path}")
 
 
 # ==================== MODEL LOADING ====================
@@ -210,9 +328,6 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
             B, T, C = class_preds.shape
             for b in range(B):
                 meta = metadata_list[slice_idx]
-                #print(slice_idx)
-                #print(meta)
-                #{'original_idx': 0, 'segment_idx': 2, 'offset_frac': 0, 'trial_id': 0}
                 slice_idx += 1
 
                 preds_per_class = []
@@ -227,7 +342,8 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
 
                     if len(intervals) > 0:
                         intervals = torch.stack(intervals)
-                        intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        intervals = soft_nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        #intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
                         intervals = intervals.cpu().tolist()
                     else:
                         intervals = []
@@ -293,15 +409,17 @@ if __name__ == "__main__":
     parser.add_argument("--label_folder", required=True)
     parser.add_argument("--output_dir", default="inference_outputs")
     parser.add_argument("--total_spec_columns", type=int, default=3000)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_classes", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--num_classes", type=int, default=3)
     parser.add_argument("--threshold", type=float, default=0.35)
-    parser.add_argument("--iou_threshold", type=float, default=0.1)
+    parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_decoder_layers", type = int, default = 3)
     parser.add_argument("--num_head_layers", type = int, default = 2)
     parser.add_argument("--low_quality_value", type=float, default=0.5)
+    parser.add_argument("--value_q2", type=float, default=1)
+    parser.add_argument("--cutoff", type=int, default=200)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     args = parser.parse_args()
 
@@ -341,12 +459,12 @@ if __name__ == "__main__":
 
     for i, (audio_path, label_path) in enumerate(zip(audio_paths, label_paths)):
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
-        print(f"\n===== Processing {os.path.basename(audio_path)} =====")
+        #print(f"\n===== Processing {os.path.basename(audio_path)} =====")
         
         audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
         audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
 
-        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.centerframe_size)
+        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
                                 collate_fn=collate_fn, drop_last=False)
 
@@ -408,7 +526,7 @@ if __name__ == "__main__":
 
         file_slices = [p for p in preds_by_slice if p["original_idx"] == i]
 
-        print(f'file_slices: {file_slices}')
+        #print(f'file_slices: {file_slices}')
         score_list = [p["scores"] for p in sorted(file_slices, key=lambda x: x["segment_idx"]) if "scores" in p and len(p["scores"]) > 0]
 
 
@@ -443,19 +561,26 @@ if __name__ == "__main__":
                 continue
 
             # Nur Frequenzen oberhalb von 200 Hz berücksichtigen
-            segment_audio_filtered = highpass_filter(segment_audio, sr, cutoff=200)
+            segment_audio_filtered = highpass_filter(segment_audio, sr, cutoff=args.cutoff)
             max_amp = float(np.max(np.abs(segment_audio_filtered)))
+            #max_amp = float(np.max(np.abs(segment_audio)))
 
             amplitudes.append(max_amp)
             scores.append(float(model_score))
             classes.append(cluster_label)
             qualities.append(cluster_quality)
 
-            snr_value = compute_snr(segment_audio, sr, cutoff=200)
+            #snr_value = compute_snr(segment_audio, sr, cutoff=args.cutoff)
+            #snr_value = compute_snr_timebased(y, sr, start_sample, end_sample)
+            snr_value = compute_snr_new(segment_audio, sr, cutoff=args.cutoff,signal_high=1000)
+            #print(cluster_quality, snr_value)
+
+            #snr_value = compute_snr_top200(segment_audio, sr)
+
             snrs.append(snr_value)
 
 
-
+    """
 
     # === Scatterplot erstellen ===
     if len(amplitudes) > 0:
@@ -554,7 +679,12 @@ if __name__ == "__main__":
     else:
         print("⚠️ Keine gültigen Daten für Amplitude–Quality-Plot gefunden.")
 
+    """
+    labels_internal = ["t", "m", "w"]
+    # Labels for display
+    display_labels = ["hmm", "moan", "wail"]
 
+    map_classes = {"t": "hmm", "m": "moan", "w": "wail"}
 
     # === Scatterplot: SNR vs Max Amplitude, colored by Quality ===
     if len(snrs) > 0 and len(amplitudes) > 0 and len(qualities) > 0:
@@ -563,15 +693,30 @@ if __name__ == "__main__":
             x=amplitudes,
             y=snrs,
             hue=qualities,          # Punkte nach Quality einfärben
-            palette="Set2",
+            style=[map_classes[c] for c in classes],
+            palette="Set3",
+            markers=["o", "s", "X", "v", "D", "^", "P"], 
             alpha=0.7,
             edgecolor="k",
             s=60
         )
-        plt.xlabel("Maximale Amplitude")
+        # 🔴 Threshold-Linien hinzufügen
+        plt.axvline(x=0.035, color='red', linestyle='--', linewidth=1.5)
+        plt.axhline(y=-1,     color='red', linestyle='--', linewidth=1.5)
+
+        #plt.xlabel("Maximale Amplitude")
+        #plt.ylabel("Signal-to-Noise Ratio (dB)")
+        #plt.title("SNR vs. Max Amplitude nach Quality Class")
+        #plt.grid(True, linestyle="--", alpha=0.5)
+        #plt.xscale("log")
+        #plt.tight_layout()
+        plt.xlabel("Maximal Amplitude")
         plt.ylabel("Signal-to-Noise Ratio (dB)")
-        plt.title("SNR vs. Max Amplitude nach Quality Class")
+        #plt.title("SNR vs. Max Amplitude by Quality and Call Class")
         plt.grid(True, linestyle="--", alpha=0.5)
+        plt.xscale("log") 
+        plt.xticks(rotation=45)
+        #plt.yscale("log") 
         plt.tight_layout()
 
         snr_amp_path = os.path.join(save_dir, "scatter_snr_vs_amplitude.png")
@@ -594,10 +739,12 @@ if __name__ == "__main__":
             edgecolor='k',
             s=60
         )
-        plt.xlabel("Maximale Amplitude")
+        plt.xlabel("Maximal Amplitude")
         plt.ylabel("Signal-to-Noise Ratio (dB)")
-        plt.title("SNR vs. Max Amplitude nach Model Score")
+        #plt.title("SNR vs. Max Amplitude by Model Score")
         plt.grid(True, linestyle="--", alpha=0.5)
+        plt.xscale("log") 
+        #plt.yscale("log")
         plt.colorbar(scatter, label="Model Score")
         plt.tight_layout()
 
