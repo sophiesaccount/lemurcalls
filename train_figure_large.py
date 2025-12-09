@@ -34,16 +34,6 @@ import os
 import matplotlib.patches as mpatches
 import glob
 
-def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
-    #whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
-    whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-
-    encoder = whisper_model.encoder
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    model.to(device)
-    model.eval()
-    return model
 
 def plot_spectrogram_and_scores(
     mel_spec,
@@ -100,13 +90,8 @@ def plot_spectrogram_and_scores(
     has_extra = extra_onsets is not None and extra_offsets is not None and extra_labels is not None
     nrows = 4 if has_extra else 3
     height_ratios = [3, 1, 0.6] + ([0.6] if has_extra else [])
-    # Textbreite aus LaTeX übernehmen (hier 14.5 cm)
-    textwidth_in = 14.5 / 2.54
 
-
-    #fig, axs = plt.subplots(nrows, 1, figsize=(12, 7 if has_extra else 6), height_ratios=height_ratios)
-    fig, axs = plt.subplots(nrows, 1, figsize=(14,  16 if has_extra else 6), height_ratios=height_ratios)
-
+    fig, axs = plt.subplots(nrows, 1, figsize=(12, 7 if has_extra else 6), height_ratios=height_ratios)
     if nrows == 3:
         ax_spec, ax_scores, ax_gt = axs
     else:
@@ -148,7 +133,7 @@ def plot_spectrogram_and_scores(
             color=color_map[c]
         )
 
-    #ax_scores.axhline(y=threshold, color='r', linestyle='--', label=f"Threshold {threshold}")
+    ax_scores.axhline(y=threshold, color='r', linestyle='--', label=f"Threshold {threshold}")
     ax_scores.set_ylim(0, 1.1)
     ax_scores.set_title("WhisperFormer Scores and Labels")
     ax_scores.set_xlabel("Time (s)")
@@ -247,33 +232,6 @@ def plot_spectrogram_and_scores(
         # Legende für Extra Labels
         patches = [mpatches.Patch(color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])) for l in unique_labels]
         ax_extra.legend(handles=patches, loc="upper right")
-    
-    # =====================
-    # 4️⃣ Häufigkeit von Onsets/Offsets pro Frame
-    # =====================
-
-    frame_on_counts = np.zeros(T)
-    frame_off_counts = np.zeros(T)
-
-    # sec_per_col = 0.02
-    # Onsets/Offsets → Frame-Indizes
-    for onset, offset in zip(pred_onsets, pred_offsets):
-        onset_frame = int(np.round(onset / sec_per_col))
-        offset_frame = int(np.round(offset / sec_per_col))
-        if 0 <= onset_frame < T:
-            frame_on_counts[onset_frame] += 1
-        if 0 <= offset_frame < T:
-            frame_off_counts[offset_frame] += 1
-
-    # Neue Achse unterhalb von Scores (z. B. Höhe 0.3)
-    ax_freq = fig.add_axes([0.125, 0.05, 0.775, 0.1])  # [left, bottom, width, height]
-    ax_freq.bar(time_axis, frame_on_counts, width=sec_per_col, color='green', alpha=0.6, label='Onsets')
-    ax_freq.bar(time_axis, frame_off_counts, width=sec_per_col, color='red', alpha=0.6, label='Offsets')
-    ax_freq.set_ylabel("Frequency")
-    ax_freq.set_xlabel("Time (s)")
-    ax_freq.legend(loc='upper right')
-    ax_freq.set_xlim(0, T * sec_per_col)
-
 
     plt.tight_layout()
 
@@ -283,9 +241,18 @@ def plot_spectrogram_and_scores(
     plt.close()
     #print(f"✅ Segment-Plot gespeichert unter {save_path}")
 
-    # ==================== MODEL LOADING ====================
+# ==================== MODEL LOADING ====================
 
+def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
+    #whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
+    whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
 
+    encoder = whisper_model.encoder
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model.to(device)
+    model.eval()
+    return model
 
 
 # ==================== INFERENCE ====================
