@@ -47,11 +47,12 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
 
 def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
     audio_files = [f for f in os.listdir(audio_folder) if f.endswith((".WAV", ".wav"))]
-    label_files = [f for f in os.listdir(label_folder) if f.endswith(".json")]
+    label_files = [f for f in os.listdir(label_folder) if f.endswith((".json", ".jsonr"))]
 
     audio_paths, label_paths = [], []
     for label in label_files:
-        key = os.path.splitext(label)[0]  # "LEMUR123"
+        #key = os.path.splitext(label)[0]  # "LEMUR123"
+        key = os.path.splitext(label)[0].replace("_preds", "")
         # suche Audio, das diesen Key enthält
         match = [a for a in audio_files if key in a]
         if match:
@@ -168,11 +169,11 @@ def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None)
 FIXED_CLUSTER_CODEBOOK = {
     "m": 0,   
     "t": 1,   
-    "w": 0,   
+    "w": 2,   
     "lt": 1,
     "h":1
 }
-
+"""
 FIXED_CLUSTER_CODEBOOK = {
     "m": 0,   
     "t": 1,   
@@ -191,20 +192,34 @@ FIXED_CLUSTER_CODEBOOK = {
     "o":0,
     "h":0
 }
-"""
+
 FIXED_CLUSTER_CODEBOOK = {
     "vocal": 0,
-    "target": 0
+    "target": 1
+}
+
+
+
+FIXED_CLUSTER_CODEBOOK = {
+    "vocal": 0,
+    "mo": 0
 }
 """
 
 
 
 
-ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
+#ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
 # Optional: inverse Mapping für spätere Rekonstruktion
-ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
+#ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
+
+
+ID_TO_CLUSTER  = {
+    0: "m", 
+    1: "h",   
+    2: "w",   
+}
 
 def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook ):
     local_audio_list = []
@@ -228,7 +243,13 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
         offset_arr[ offset_arr > len(y)/label["sr"] ] = len(y)/label["sr"]
 
         label["cluster"] = [ label["cluster"][idx] for idx in np.argwhere(valid_indices)[:,0] ]  
-        label["quality"] = [ label["quality"][idx] for idx in np.argwhere(valid_indices)[:,0] ]       
+        # Handle quality (optional)
+        if "quality" in label:
+            label["quality"] = [label["quality"][idx] for idx in np.argwhere(valid_indices)[:, 0]]
+        else:
+            # Fill with 'unknown' for each valid entry
+            label["quality"] = ['unknown'] * len(label["cluster"])
+        #label["quality"] = [ label["quality"][idx] for idx in np.argwhere(valid_indices)[:,0] ]       
         cluster_id_arr = np.array( [ cluster_codebook[ str(value) ] for value in label["cluster"] ]  )
         quality_id_arr = np.array(label["quality"])
         
@@ -445,6 +466,66 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
 
                 start += num_samples_in_clip
                 seg_idx += 1
+
+
+    return new_audios, new_labels, new_metadata
+
+###vorsicht: ohen left padding!!!!!!
+def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0):
+    """
+    Slice audios into overlapping segments with different offsets (0, 1/3, 2/3).
+    Returns expanded audio_list, label_list, metadata_list with offset_frac.
+    """
+
+    new_audios, new_labels, new_metadata = [], [], []
+    sec_per_col = 0.01
+    spec_time_step = 0.01
+    total_spec_columns=3000
+
+    for orig_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
+        sr = 16000
+        clip_duration = total_spec_columns * spec_time_step
+        num_samples_in_clip = int(round(clip_duration * sr))
+
+        start = offset
+        seg_idx = 0
+
+        while start < len(audio):
+            end = start + num_samples_in_clip
+            audio_clip = audio[start:end]
+
+            #if len(audio_clip) < sr * 0.1:  # skip super short
+            #    break
+
+
+            # Labels anpassen: nur Events im Zeitfenster behalten
+            start_time = start / sr
+            end_time = end / sr
+            intersected_indices = np.logical_and(
+                label["onset"] < end_time, label["offset"] > start_time
+            )
+
+            label_clip = deepcopy(label)
+            label_clip.update({
+                "onset": np.maximum(label["onset"][intersected_indices], start_time) - start_time,
+                "offset": np.minimum(label["offset"][intersected_indices], end_time) - start_time,
+                "cluster_id": label["cluster_id"][intersected_indices],
+                "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
+                "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
+            })
+
+            # speichern
+            new_audios.append(audio_clip)
+            new_labels.append(label_clip)
+            new_metadata.append({
+                "original_idx": orig_idx,
+                "segment_idx": seg_idx,
+                "offset_frac": offset,   # tells us in which trial we are, by giving us the offset
+                "trial_id": offset
+            })
+
+            start += num_samples_in_clip
+            seg_idx += 1
 
 
     return new_audios, new_labels, new_metadata
