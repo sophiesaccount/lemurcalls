@@ -9,7 +9,7 @@ from typing import Dict, List, Union
 import librosa
 import numpy as np
 
-from datautils import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
+from datautils_ben import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
 from model import WhisperSegmenterFast
 from train import evaluate
 from utils import create_if_not_exists
@@ -56,11 +56,11 @@ def evaluate_dataset(audio_folder: str, label_folder:str, model_path: str, num_t
     for audio_path, label_path in zip(audio_paths, label_paths):
         with open(label_path, 'r') as f:
             label = json.load(f)
-        audio, _ = librosa.load(audio_path, sr = label["sr"])
+        audio, _ = librosa.load(audio_path, sr = 48000)
         audio_list.append(audio)
         label_list.append(label) 
 
-    segmenter = WhisperSegmenterFast(model_path = model_path,  device = "cuda")
+    segmenter = WhisperSegmenterFast(model_path = model_path,  device = "cpu")
     if kwargs['identifier']:
         cm_name = raw_data_name = kwargs['identifier']
     else:
