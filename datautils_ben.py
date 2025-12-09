@@ -56,10 +56,10 @@ def get_cluster_codebook( label_paths, initial_cluster_codebook ):
 
 merge_map = {
     "m": 'm',   
-    "t": 't',   
-    "w": 'w',   
-    "lt": 't',
-    "h":'t'
+    "t": 'm',   
+    "w": 'm',   
+    "lt": 'm',
+    "h":'m'
 }
 
 def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook , merge_map=merge_map):

@@ -4,6 +4,7 @@ import os
 import sys
 from datetime import datetime
 from glob import glob
+import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
@@ -290,6 +291,7 @@ if __name__ == "__main__":
     early_stop = False
     current_step = 0
 
+
     for epoch in range(args.max_num_epochs + 1):  # This +1 is to ensure current_step can reach args.max_num_iterations
         for count, batch in enumerate( tqdm( training_dataloader, desc=f'epoch-{epoch:03}', disable=is_scheduled_job()) ):
             training_loss_value_list.append( train_iteration(batch) )
@@ -373,4 +375,25 @@ if __name__ == "__main__":
         params_path = os.path.join(hf_model_folder, "training_args.json")
         with open(params_path, "w") as f:
             json.dump(vars(args), f, indent=4)
-    print("All Done!")
+        
+
+
+        # === Plot Loss Curves ===
+        plt.figure(figsize=(8, 5))
+        plt.plot(training_loss_value_list, label="Training Loss")
+        plt.plot(val_score_history, label="Validation Loss")
+
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Training and Validation Loss")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+
+        # Save plot
+        loss_plot_path = os.path.join(ct2_model_folder, "loss_curve.png")
+        plt.savefig(loss_plot_path)
+        print("Saved loss curve to:", loss_plot_path)
+        plt.close()
+
+        print("All Done!")
