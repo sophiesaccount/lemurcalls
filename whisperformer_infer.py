@@ -4,412 +4,304 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-from whisperformer_dataset import WhisperFormerDataset
-from whisperformer_model import WhisperFormer
-from transformers import WhisperModel
-from datautils import get_audio_and_label_paths_from_folders, load_data, get_cluster_codebook
-from datautils import slice_audios_and_labels
-from whisperformer_train import collate_fn  # Reuse collate function from training
-import numpy as np
+from datetime import datetime
 from collections import defaultdict
+import numpy as np
 
-def load_trained_whisperformer(checkpoint_path, num_classes, device):
-    """Load the WhisperFormer model with Whisper encoder and trained weights."""
-    whisper_model = WhisperModel.from_pretrained("openai/whisper-tiny")
+from whisperformer_dataset_quality import WhisperFormerDatasetQuality
+from whisperformer_model import WhisperFormer
+from transformers import WhisperModel, WhisperFeatureExtractor
+from datautils import (
+    get_audio_and_label_paths_from_folders,
+    load_data,
+    slice_audios_and_labels,
+    FIXED_CLUSTER_CODEBOOK,
+    ID_TO_CLUSTER
+)
+from whisperformer_train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities, group_by_file
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import precision_score, recall_score, f1_score
+import contextlib
+
+
+
+# ==================== MODEL LOADING ====================
+
+def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
+    whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
     encoder = whisper_model.encoder
-
-    model = WhisperFormer(encoder, num_classes=num_classes)
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.to(device)
     model.eval()
     return model
 
 
+# ==================== INFERENCE ====================
 
-def nms_1d_torch(intervals: torch.Tensor, iou_threshold: float = 0.5):
+def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
     """
-    intervals: Tensor [N, 3] -> (start, end, score)
-    iou_threshold: IoU Threshold for suppression
-
-    returns: Tensor [M, 3] of kept intervals
+    Führt Inferenz durch und ordnet jede Vorhersage exakt dem Slice in metadata_list zu.
+    Gibt eine Liste von Einträgen zurück:
+    {
+      "original_idx": int,
+      "segment_idx": int,
+      "preds": [ { "class": c, "intervals": [[start_col, end_col, score], ...] }, ... ]
+    }
     """
-    if intervals.numel() == 0:
-        return intervals.new_zeros((0, 3))
-
-    starts = intervals[:, 0]
-    ends = intervals[:, 1]
-    scores = intervals[:, 2]
-
-    # Sort by score descending
-    order = scores.argsort(descending=True)
-    keep = []
-
-    while order.numel() > 0:
-        i = order[0]
-        keep.append(i)
-
-        if order.numel() == 1:
-            break
-
-        # compute IoU with the rest
-        ss = torch.maximum(starts[i], starts[order[1:]])
-        ee = torch.minimum(ends[i], ends[order[1:]])
-        inter = torch.clamp(ee - ss, min=0)
-
-        union = (ends[i] - starts[i]) + (ends[order[1:]] - starts[order[1:]]) - inter
-        iou = inter / union
-
-        # keep only intervals with IoU <= threshold
-        inds = (iou <= iou_threshold).nonzero(as_tuple=False).squeeze(1)
-        order = order[inds + 1]
-    #print("intervals.shape:", intervals.shape)
-    #print("keep.shape:", keep.shape, keep.dtype)
-    #out = intervals[keep]
-    out = intervals[torch.tensor(keep, dtype=torch.long, device=intervals.device)]
-    if out.ndim == 1:   # turn single interval into [1,3]
-        out = out.unsqueeze(0)
-    return out
-
-
-
-def run_inference_new(model, dataloader, device, threshold):
-    iou_threshold = 0.5
-    all_preds = []
-    min_duration = 0.001
-    sec_per_col = 0.005
+    preds_by_slice = []
+    slice_idx = 0
+    model.eval()
 
     with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Inference"):
-            for key in batch:
-                batch[key] = batch[key].to(device)
-            
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+        for batch in dataloader:
+            # Tensoren auf Device bringen
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(device, non_blocking=True)
+
+            # Autocast nur auf CUDA aktivieren
+            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (hasattr(device, "type") and device.type == "cuda")
+            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+
+            with autocast_ctx:
                 class_preds, regr_preds = model(batch["input_features"])
                 class_probs = torch.sigmoid(class_preds)
 
-                B, T, _ = regr_preds.shape[:3]
-                _, _, C = class_probs.shape
+            B, T, C = class_preds.shape
+            for b in range(B):
+                # passendes Slice aus metadata_list holen
+                meta = metadata_list[slice_idx]
+                slice_idx += 1
 
-                for b in range(B):
-                    for c in range(C):
+                preds_per_class = []
+                for c in range(C):
+                    intervals = []
+                    for t in range(T):
+                        score = class_probs[b, t, c]
+                        if float(score) > threshold:
+                            start = t - regr_preds[b, t, 0]
+                            end   = t + regr_preds[b, t, 1]
+                            intervals.append(torch.stack([start, end, score]))
+
+                    if len(intervals) > 0:
+                        intervals = torch.stack(intervals)
+                        intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        intervals = intervals.cpu().tolist()
+                    else:
                         intervals = []
-                        for t in range(T):
-                            score = class_probs[b, t, c]
-                            if score > threshold:
-                                start = t - regr_preds[b, t, 0]
-                                end   = t + regr_preds[b, t, 1]
-                                interval = torch.stack([start, end, score])
-                                intervals.append(interval)
 
-                                # only keep intervals longer than min_duration
-                                duration_sec = (interval[1] - interval[0]) * sec_per_col
-                                if duration_sec >= min_duration:
-                                    intervals.append(interval)
+                    preds_per_class.append({"class": c, "intervals": intervals})
 
-                        if len(intervals) > 0:
-                            intervals = torch.stack(intervals)  # [N, 3]
-                            kept = nms_1d_torch(intervals, iou_threshold=iou_threshold)
-                            kept = kept.cpu().tolist()
-                        else:
-                            kept = []
+                preds_by_slice.append({
+                    "original_idx": meta["original_idx"],
+                    "segment_idx": meta["segment_idx"],
+                    "preds": preds_per_class
+                })
 
-                        all_preds.append({
-                            "batch": b,
-                            "class": c,
-                            "intervals": kept
-                        })
-    return all_preds
+    # Sanity-Check: Anzahl Slices sollte übereinstimmen
+    assert len(preds_by_slice) == len(metadata_list), (
+        f"Vorhersage-Liste ({len(preds_by_slice)}) ungleich Metadata-Liste ({len(metadata_list)}). "
+        "Prüfen Sie, ob DataLoader shuffle=False ist und die Reihenfolge konsistent ist."
+    )
 
-def make_trials(audio_list, label_list, total_spec_columns, num_trials=1):
-    """Erzeuge mehrere überlappende Trials (z. B. mit 1/3 Versatz)."""
-    all_audio, all_label, all_meta = [], [], []
-    hop = total_spec_columns // num_trials
-    for trial in range(num_trials):
-        audios, labels, metas = slice_audios_and_labels(
-            audio_list, label_list, total_spec_columns, offset=trial*hop
-        )
-        for m in metas:
-            m["trial"] = trial
-        all_audio.extend(audios)
-        all_label.extend(labels)
-        all_meta.extend(metas)
-    return all_audio, all_label, all_meta
+    return preds_by_slice
 
+def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
+    preds_by_slice = []
+    slice_idx = 0
+    model.eval()
 
-def consolidate_trials_by_voting(preds, min_votes=2, iou_threshold=0.3):
-    """
-    preds: Liste [(start_sec, end_sec, class, trial), ...] für eine Originalaufnahme
-    min_votes: wie viele Trials müssen zustimmen?
-    iou_threshold: wann gelten zwei Calls als derselbe?
-    """
-    final_preds = []
-    used = [False] * len(preds)
+    with torch.no_grad():
+        for batch in dataloader:
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(device, non_blocking=True)
 
-    for i, (s1, e1, c1, t1) in enumerate(preds):
-        if used[i]:
-            continue
-        votes = 1
-        overlaps = [(s1, e1, c1)]
-        for j, (s2, e2, c2, t2) in enumerate(preds):
-            if i == j or used[j]:
-                continue
-            if c1 != c2:
-                continue
-            # IoU berechnen
-            inter = max(0, min(e1, e2) - max(s1, s2))
-            union = (e1 - s1) + (e2 - s2) - inter
-            iou = inter / union if union > 0 else 0
-            if iou > iou_threshold:
-                votes += 1
-                overlaps.append((s2, e2, c2))
-                used[j] = True
+            use_autocast = (
+                isinstance(device, str) and device.startswith("cuda")
+            ) or (
+                hasattr(device, "type") and device.type == "cuda"
+            )
+            autocast_ctx = torch.amp.autocast(
+                device_type="cuda", dtype=torch.float16
+            ) if use_autocast else contextlib.nullcontext()
 
-        if votes >= min_votes:
-            # Mittelwert der überlappenden Intervalle nehmen
-            start = np.mean([s for (s, e, c) in overlaps])
-            end   = np.mean([e for (s, e, c) in overlaps])
-            final_preds.append((start, end, c1))
+            with autocast_ctx:
+                class_preds, regr_preds = model(batch["input_features"])
+                class_probs = torch.sigmoid(class_preds)
 
-    return final_preds
+            B, T, C = class_preds.shape
 
+            for b in range(B):
+                meta = metadata_list[slice_idx]
+                slice_idx += 1
 
-def majority_voting_across_trials(final_preds, iou_threshold=0.3):
-    """
-    Filter predictions via majority voting across trials.
-    A call is only kept if it overlaps with a call from at least one other trial.
+                ############################################################
+                # 1) ALLE Intervalle aller Klassen sammeln (NEU)
+                ############################################################
+                all_intervals = []     ### ADDED
+                for c in range(C):
+                    for t in range(T):
+                        score = class_probs[b, t, c]
+                        if float(score) > threshold:
+                            start = t - regr_preds[b, t, 0]
+                            end   = t + regr_preds[b, t, 1]
 
-    final_preds: dict[orig_idx] -> dict with onset/offset/cluster
-                 (must include 'offset_frac' in metadata)
-    """
-    voted_preds = {}
+                            all_intervals.append(
+                                torch.tensor([start, end, score, c], device=score.device)
+                            )  ### ADDED
 
-    for orig_idx, pred in final_preds.items():
-        onsets = np.array(pred["onset"])
-        offsets = np.array(pred["offset"])
-        clusters = np.array(pred["cluster"])
-        fracs = np.array(pred["offset_frac"])  # kommt aus metadata beim Reconstruction-Schritt!
-
-        keep_mask = np.zeros(len(onsets), dtype=bool)
-
-        for i in range(len(onsets)):
-            this_on, this_off, this_frac = onsets[i], offsets[i], fracs[i]
-
-            # IoU mit allen anderen Trials
-            overlaps = []
-            for j in range(len(onsets)):
-                if i == j:
-                    continue
-                if fracs[j] == this_frac:  # nur andere Trials zählen
+                # Wenn keine Intervalle -> leer zurückgeben
+                if len(all_intervals) == 0:
+                    preds_per_class = [{"class": c, "intervals": []} for c in range(C)]
+                    preds_by_slice.append({
+                        "original_idx": meta["original_idx"],
+                        "segment_idx": meta["segment_idx"],
+                        "preds": preds_per_class
+                    })
                     continue
 
-                inter = max(0, min(offsets[j], this_off) - max(onsets[j], this_on))
-                union = (this_off - this_on) + (offsets[j] - onsets[j]) - inter
-                iou = inter / union if union > 0 else 0
+                all_intervals = torch.stack(all_intervals)  ### ADDED
 
-                overlaps.append(iou > iou_threshold)
+                ############################################################
+                # 2) Klassenübergreifendes NMS (NEU)
+                ############################################################
+                kept = soft_nms_1d_torch(all_intervals, iou_threshold)   ### ADDED
 
-            # Call behalten, wenn er in >=1 anderem Trial überschneidet
-            if any(overlaps):
-                keep_mask[i] = True
+                ############################################################
+                # 3) Wieder pro Klasse einsortieren (NEU)
+                ############################################################
+                preds_per_class = []  ### ADDED
+                for c in range(C):    ### ADDED
+                    mask = kept[:, 3] == c
+                    cls_int = kept[mask][:, :3].cpu().tolist()   # class-id weg
+                    preds_per_class.append({"class": c, "intervals": cls_int})
 
-        voted_preds[orig_idx] = {
-            "onset": onsets[keep_mask].tolist(),
-            "offset": offsets[keep_mask].tolist(),
-            "cluster": clusters[keep_mask].tolist()
-        }
+                ############################################################
+                # Rückgabe wie vorher
+                ############################################################
+                preds_by_slice.append({
+                    "original_idx": meta["original_idx"],
+                    "segment_idx": meta["segment_idx"],
+                    "preds": preds_per_class
+                })
 
-    return voted_preds
+    return preds_by_slice
 
 
-def reconstruct_predictions(all_preds, metadata_list, total_spec_columns, sec_per_col=0.0025):
+def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
     """
-    Map model predictions back to original audio timeline (in seconds).
-    Keeps track of offset_frac (trial ID).
+    Rekonstruiert alle Vorhersagen aus Slice-Koordinaten in Datei-Zeitkoordinaten.
+    Gibt ein Dict mit Listen zurück: {"onset": [], "offset": [], "cluster": [], "score": []}
     """
-    from collections import defaultdict
     grouped_preds = defaultdict(list)
+    for ps in preds_by_slice:
+        grouped_preds[ps["original_idx"]].append(ps)
 
-    # Gruppiere nach Original-Audio
-    for pred, meta in zip(all_preds, metadata_list):
-        grouped_preds[meta["original_idx"]].append({
-            "segment_idx": meta["segment_idx"],
-            "class": pred["class"],
-            "intervals": pred["intervals"],
-            "offset_frac": meta["offset_frac"],
-            "trial_id": meta["trial_id"]
-        })
+    sec_per_col = 0.02
+    cols_per_segment = total_spec_columns // 2  # T entspricht total_spec_columns/2
 
-    final_preds = {}
+    all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
 
-    for orig_idx, segs in grouped_preds.items():
-        segs_sorted = sorted(segs, key=lambda x: x["segment_idx"])  
-
-        classes, onsets, offsets, fracs, ids = [], [], [], [], []
-
+    # Über alle Originaldateien iterieren
+    for orig_idx in sorted(grouped_preds.keys()):
+        segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
         for seg in segs_sorted:
-            offset_cols = seg["segment_idx"] * args.total_spec_columns
-            offset_cols += int(seg["offset_frac"] * args.total_spec_columns)  # Linkspadding-Offset
+            offset_cols = seg["segment_idx"] * cols_per_segment
+            for p in seg["preds"]:
+                c = p["class"]
+                for (start_col, end_col, score) in p["intervals"]:
+                    start_sec = (offset_cols + start_col) * sec_per_col
+                    end_sec   = (offset_cols + end_col)   * sec_per_col
+                    all_preds_final["onset"].append(float(start_sec))
+                    all_preds_final["offset"].append(float(end_sec))
+                    # Map Klasse-ID -> Cluster-Label
+                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
+                    all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
+                    all_preds_final["score"].append(float(score))
 
-            for (start_col, end_col, score) in seg["intervals"]:  
-                start_sec = (offset_cols + start_col) * sec_per_col
-                end_sec   = (offset_cols + end_col)   * sec_per_col
-
-                classes.append(seg["class"])
-                onsets.append(float(start_sec))
-                offsets.append(float(end_sec))
-                fracs.append(seg["offset_frac"])   # Trial speichern
-                ids.append(seg['trial_id'])
-
-        final_preds[orig_idx] = {
-            "onset": onsets,
-            "offset": offsets,
-            "cluster": classes,
-            "offset_frac": fracs,
-            "trial_id": ids
-        }
-
-    return final_preds
+    return all_preds_final
 
 
 
-def majority_voting_across_trials(final_preds, overlap_threshold=0.001):
-    """
-    final_preds: dict[original_idx] -> {"onset":[], "offset":[], "cluster":[]}
-    overlap_threshold: minimale Überlappung in Sekunden, um ein Event als bestätigt zu werten
-    """
-    voted_preds = {}
-    
-    for orig_idx, preds in final_preds.items():
-        onsets = np.array(preds["onset"])
-        offsets = np.array(preds["offset"])
-        clusters = np.array(preds["cluster"])
-        keep = np.zeros(len(onsets), dtype=bool)
-        
-        for i in range(len(onsets)):
-            for j in range(len(onsets)):
-                if i == j:
-                    continue
-                # Überlappung prüfen
-                overlap = max(0, min(offsets[i], offsets[j]) - max(onsets[i], onsets[j]))
-                if overlap >= overlap_threshold:
-                    keep[i] = True
-                    break
-        
-        voted_preds[orig_idx] = {
-            "onset": list(onsets[keep]),
-            "offset": list(offsets[keep]),
-            "cluster": list(clusters[keep])
-        }
-    
-    return voted_preds
-
-def majority_voting_across_trials_efficient(final_preds, overlap_threshold=0.0001):
-    """
-    Majority voting across trials (efficient version).
-    Only compares events that are likely to overlap.
-    """
-    voted_preds = {}
-
-    for orig_idx, preds in final_preds.items():
-        onsets = np.array(preds["onset"])
-        offsets = np.array(preds["offset"])
-        clusters = np.array(preds["cluster"])
-        fracs = np.array(preds["offset_frac"])
-        ids = np.array(preds["trial_id"], dtype=int)
-        
-        N = len(onsets)
-        keep = np.zeros(N, dtype=bool)
-        
-        # Sortiere nach Startzeit
-        order = np.argsort(onsets)
-        onsets_s = onsets[order]
-        offsets_s = offsets[order]
-        clusters_s = clusters[order]
-        fracs_s = fracs[order]
-        ids_s =ids[order]
-        
-        for i in range(N):
-            this_on = onsets_s[i]
-            this_off = offsets_s[i]
-            this_frac = fracs_s[i]
-            this_class = clusters_s[i]
-            this_id = ids_s[i]
-            
-            # Betrachte nur Events, die starten bevor dieses endet + overlap_threshold
-            j_start = i + 1
-            while j_start < N and onsets_s[j_start] <= this_off + overlap_threshold:
-                if ids_s[j_start] != this_id and clusters_s[j_start] == this_class:
-                    # Überlappung prüfen
-                    overlap = max(0, min(this_off, offsets_s[j_start]) - max(this_on, onsets_s[j_start]))
-                    if overlap >= overlap_threshold:
-                        keep[order[i]] = True
-                        keep[order[j_start]] = True
-                j_start += 1
-        
-        voted_preds[orig_idx] = {
-            "onset": list(onsets[keep]),
-            "offset": list(offsets[keep]),
-            "cluster": list(clusters[keep])
-        }
-
-    return voted_preds
-
-        
+# ==================== MAIN ====================
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint_path", required=True, help="Path to the .pth trained model")
+    parser.add_argument("--checkpoint_path", required=True)
     parser.add_argument("--audio_folder", required=True)
-    parser.add_argument("--label_folder", required=True)  
-    parser.add_argument("--output_json", default="inference_results.json")
-    parser.add_argument("--max_length", type=int, default=100)
+    parser.add_argument("--label_folder", required=True)
+    parser.add_argument("--output_dir", default="inference_outputs")
     parser.add_argument("--total_spec_columns", type=int, default=3000)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_classes", type=int, default=1)
-    parser.add_argument("--threshold", type=float, default=0.2)
+    parser.add_argument("--threshold", type=float, default=0.35)
+    parser.add_argument("--iou_threshold", type=float, default=0.1)
+    parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--num_decoder_layers", type = int, default = 3)
+    parser.add_argument("--num_head_layers", type = int, default = 2)
+    parser.add_argument("--low_quality_value", type = float, default = 0.5)
+    parser.add_argument("--value_q2", type = float, default = 1)
+    parser.add_argument("--allowed_qualities", default = [1,2])
+    parser.add_argument("--num_workers", type = int, default = 1 )
     args = parser.parse_args()
 
-    # ===== Data loading =====
+    # === Zeitgestempelten Unterordner erstellen ===
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    save_dir = os.path.join(args.output_dir, timestamp)
+    os.makedirs(save_dir, exist_ok=True)
+
+    # === Argumente speichern ===
+    args_path = os.path.join(save_dir, "run_arguments.json")
+    with open(args_path, "w") as f:
+        json.dump(vars(args), f, indent=2)
+    print(f"✅ Argumente gespeichert unter: {args_path}")
+
+    #os.makedirs(args.output_dir, exist_ok=True)
+
     audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    cluster_codebook = FIXED_CLUSTER_CODEBOOK
+    id_to_cluster = ID_TO_CLUSTER
+
+    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.device)
+    feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
+
+    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    for audio_path, label_path in zip(audio_paths, label_paths):
+        print(f"\n===== Processing {os.path.basename(audio_path)} =====")
+        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
+        audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+
+        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2,args.centerframe_size)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
+                                collate_fn=collate_fn, drop_last=False)
+
+        preds_by_slice = run_inference_new(
+        model=model,
+        dataloader=dataloader,          # muss mit shuffle=False erstellt sein
+        device=args.device,
+        threshold=args.threshold,
+        iou_threshold=args.iou_threshold,
+        metadata_list=metadata_list     # kommt aus slice_audios_and_labels
+        )
+
+        final_preds = reconstruct_predictions(
+        preds_by_slice=preds_by_slice,
+        total_spec_columns=args.total_spec_columns,
+        ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
+        )
+
+
+
+        # Predictions pro Datei speichern
+        base_name = os.path.splitext(os.path.basename(audio_path))[0]
+        json_path = os.path.join(save_dir, f"{base_name}_preds.json")
+        with open(json_path, "w") as f:
+            json.dump(final_preds, f, indent=2)
+        print(f"✅ Predictions saved to {json_path}")
+
+
     
-    # Create a dummy cluster codebook to use load_data
-    cluster_codebook = get_cluster_codebook(label_paths, {})
-    
-    # Load audio + labels
-    audio_list, label_list = load_data(audio_paths, label_paths, cluster_codebook=cluster_codebook, n_threads=1)
-    
-    # Slice to fit model spec length, slices three times each with 1/3 offset shifted
-    audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns, num_trials=1)
-
-    # Load data
-    dataset = WhisperFormerDataset(audio_list, label_list, tokenizer=None, 
-                                   max_length=args.max_length, total_spec_columns=args.total_spec_columns)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, 
-                            collate_fn=collate_fn, drop_last=False)
-
-    # ===== Model loading =====
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
-
-    # ===== Inference ===== (per slice)
-    print('starting inference...')
-    all_preds = run_inference_new(model, dataloader, args.device, args.threshold)
-
-    # ===== Reconstruction =====
-    print('starting reconstruction...')
-    final_preds = reconstruct_predictions(all_preds, metadata_list, args.total_spec_columns)
-
-    # ===== Majority Voting =====
-    print('starting majority voting')
-    voted_preds = majority_voting_across_trials_efficient(final_preds, overlap_threshold=0.001)
-
-    # Anzahl Calls nach Voting
-    total = sum(len(preds["cluster"]) for preds in voted_preds.values())
-    print(f"Total calls after voting: {total}")
-
-    # ===== Save as .json =====
-    with open(args.output_json, "w") as f:
-        json.dump(voted_preds, f, indent=2)
-
-    print(f"Inference complete. Results saved to {args.output_json}")
