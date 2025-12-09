@@ -2,8 +2,8 @@ import json
 import statistics
 
 # Pfad zur JSON-Datei
-json_file = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder/new_labels/final_model_20250821_111839/inference_results1.json"
-
+#json_file = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder/new_labels/final_model_20250826_185943/inference_results1.json"
+json_file = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder/new_labels/final_model_20250908_132512/inference_results.json"
 # JSON-Datei einlesen
 with open(json_file, 'r') as f:
     data = json.load(f)

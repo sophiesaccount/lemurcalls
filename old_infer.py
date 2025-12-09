@@ -4,15 +4,14 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from datetime import datetime
 
 from whisperformer_dataset import WhisperFormerDataset
 from whisperformer_model import WhisperFormer
-#from wf_model_old import WhisperFormer
-#from model_linear import WhisperFormer
 from transformers import WhisperModel
 from datautils import get_audio_and_label_paths_from_folders, load_data, get_cluster_codebook, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER
 from datautils import slice_audios_and_labels
-from whisperformer_train import collate_fn  # Reuse collate function from training
+from whisperformer_train import collate_fn  
 import numpy as np
 from collections import defaultdict
 import torch 
@@ -79,17 +78,17 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
 def run_inference_new(model, dataloader, device, threshold, iou_threshold):
     all_preds = []
     min_duration = 0.001
-    sec_per_col = 0.0025
+    sec_per_col = 0.02
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Inference"):
-            for key in batch:
-                batch[key] = batch[key].to(device)
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(device, non_blocking=True)
             
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 class_preds, regr_preds = model(batch["input_features"])
                 class_probs = torch.sigmoid(class_preds)
-
                 B, T, C = class_preds.shape
 
                 for b in range(B):
@@ -115,6 +114,8 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold):
                             "class": c,
                             "intervals": kept
                         })
+
+
     return all_preds
 
 def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.0001):
@@ -148,13 +149,13 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
             if overlap_ratio > overlap_tolerance:
                 matched_labels.add(l_idx)
                 matched_preds.add(p_idx)
-                #if str(pc) == str(lc):
-                #    matched_labels.add(l_idx)
-                #    matched_preds.add(p_idx)
-                #else:
-                #    matched_labels.add(l_idx)
-                #    matched_preds.add(p_idx)
-                #    false_class += 1
+                if str(pc) == str(lc):
+                    matched_labels.add(l_idx)
+                    matched_preds.add(p_idx)
+                else:
+                    matched_labels.add(l_idx)
+                    matched_preds.add(p_idx)
+                    false_class += 1
                 break
 
     tp = len(matched_labels) - false_class
@@ -286,19 +287,35 @@ if __name__ == "__main__":
 
 
     # ===== Save as .json =====
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # z.B. 20250930_201530
+    checkpoint_dir = os.path.dirname(args.checkpoint_path)
+
+    output_json = os.path.join(checkpoint_dir, f"_{timestamp}.json")
     with open(args.output_json, "w") as f:
         json.dump(final_preds, f, indent=2)
 
-    print(f"Inference complete. Results saved to {args.output_json}")
+    print(f"Inference complete. Results saved to {output_json}")
 
     with open(args.labels, 'r') as f:
         labels = json.load(f)
+    
+    for sample in labels:
+        clusters = sample["cluster"]
+        
+        # Wenn nur ein einzelner Clusterwert drin ist, mache ihn zu einer Liste
+        if not isinstance(clusters, (list, np.ndarray)):
+            clusters = [clusters]
+        
+        # Mappe alle Cluster IDs
+        mapped = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
-    metrics = evaluate_detection_metrics_with_false_class(labels, final_preds, overlap_tolerance=0.001)
+        # Wenn das Original ein einzelner Wert war, wieder Einzelwert speichern
+        sample["cluster"] = mapped if len(mapped) > 1 else mapped[0]
+        metrics = evaluate_detection_metrics_with_false_class(labels, final_preds, overlap_tolerance=0.001)
 
     # Datei öffnen (z. B. im aktuellen Ordner)
-    checkpoint_dir = os.path.dirname(args.checkpoint_path)
-    output_file = os.path.join(checkpoint_dir, "metrics_results.txt")
+    output_file = os.path.join(checkpoint_dir, f"metrics_results_{timestamp}.txt")
+
     with open(output_file, "w") as f:
         f.write(f"True Positives: {metrics['tp']}\n")
         f.write(f"False Positives: {metrics['fp']}\n")
@@ -307,6 +324,8 @@ if __name__ == "__main__":
         f.write(f"Precision: {metrics['precision']:.4f}\n")
         f.write(f"Recall: {metrics['recall']:.4f}\n")
         f.write(f"F1-Score: {metrics['f1']:.4f}\n")
+        json.dump(vars(args), f, indent=4)
+
 
     print(f"Evaluation metrics wurden in '{output_file}' gespeichert.")
 
