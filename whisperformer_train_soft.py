@@ -143,7 +143,7 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
 
                     if len(intervals) > 0:
                         intervals = torch.stack(intervals)
-                        intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        intervals = soft_nms_1d_torch(intervals, iou_threshold=iou_threshold)
                         intervals = intervals.cpu().tolist()
                     else:
                         intervals = []
@@ -337,16 +337,13 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     pred_offsets = np.array(predictions['offset'])
     pred_clusters = np.array(predictions['cluster'])
     pred_scores = np.array(predictions['score'])
-
-    if any(str(x).lower() == "unknown" for x in pred_scores):
-        print('Score unknown')
-    else:
-        # sort predictions by score descending
-        order = np.argsort(-pred_scores)
-        pred_onsets = pred_onsets[order]
-        pred_offsets = pred_offsets[order]
-        pred_clusters = pred_clusters[order]
-        pred_scores = pred_scores[order]
+    
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
 
     matched_labels = set()
     matched_preds = set()
@@ -394,7 +391,6 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
         'precision': precision, 'recall': recall, 'f1': f1
     }
-
 
 
 def losses_val(
@@ -596,6 +592,7 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
     )
 
+
     all_preds_final["onset"].extend(final_preds["onset"])
     all_preds_final["offset"].extend(final_preds["offset"])
     all_preds_final["cluster"].extend(final_preds["cluster"])
@@ -732,11 +729,11 @@ if __name__ == "__main__":
     parser.add_argument("--no_decoder", type = bool, default = False)
     parser.add_argument("--T_max", type = int, default = None)
     parser.add_argument("--eta_min", type = float, default = 1e-6)
-    parser.add_argument("--thresholds", type=float, nargs="+", default=[0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85])   
+    parser.add_argument("--thresholds", type=float, nargs="+", default=[0.4, 0.5, 0.6, 0.7, 0.8])   
     parser.add_argument("--iou_threshold", type = float, default = 0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
-    parser.add_argument("--low_quality_value", type=float, default=0.3)
+    parser.add_argument("--low_quality_value", type=float, default=1)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     parser.add_argument("--allowed_qualities", default=[1,2,3])
@@ -787,7 +784,7 @@ if __name__ == "__main__":
     
     #if args.val_ratio > 0:
     #    audio_list_train, audio_list_val, label_list_train, label_list_val = train_test_split(audio_list_train, label_list_train, test_size = args.val_ratio)
-    """
+    
     class_weights, counts = compute_class_weights_from_label_list(
         label_list_train,
         FIXED_CLUSTER_CODEBOOK
@@ -795,8 +792,6 @@ if __name__ == "__main__":
 
     print("Class counts:", counts)
     print("Class weights:", class_weights)
-    """
-    class_weights=None
    
     #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
