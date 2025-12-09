@@ -9,13 +9,14 @@ from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
 
 class WhisperFormerDatasetQuality(Dataset):
-    def __init__(self, audio_list, label_list, total_spec_columns, feature_extractor, num_classes, low_quality_value, centerframe_size):
+    def __init__(self, audio_list, label_list, total_spec_columns, feature_extractor, num_classes, low_quality_value, value_q2, centerframe_size):
         self.audio_list = audio_list
         self.label_list = label_list
         self.total_spec_columns = total_spec_columns
         self.num_classes = num_classes
         self.feature_extractor = feature_extractor
         self.low_quality_value = low_quality_value
+        self.value_q2 = value_q2
         self.centerframe_size = centerframe_size
         
 
@@ -43,7 +44,6 @@ class WhisperFormerDatasetQuality(Dataset):
         spec_time_step = 0.01  # 10 ms
         num_samples_in_clip = int(round(self.total_spec_columns * spec_time_step * target_sr))
 
-        # Hier ggf. Startposition bestimmen (bei dir ist clip_start=0)
         clip_start = 0
         audio = audio[clip_start : clip_start + num_samples_in_clip]
 
@@ -134,8 +134,10 @@ class WhisperFormerDatasetQuality(Dataset):
             gaussian = np.exp(-0.5 * ((label_frames - center_frame) / sigma) ** 2)
 
             frame_update = np.zeros(reduced_sequence_length, dtype=np.float32)
-            if str(quality) != "3":
+            if str(quality) != "3" and str(quality) != "2":
                 frame_update[label_frames] = 1
+            elif str(quality) == "2":
+                frame_update[label_frames] = self.value_q2
             else: 
                 frame_update[label_frames] = self.low_quality_value
             # Frame-Labels aktualisieren
