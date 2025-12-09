@@ -337,16 +337,14 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     pred_offsets = np.array(predictions['offset'])
     pred_clusters = np.array(predictions['cluster'])
     pred_scores = np.array(predictions['score'])
-
-    if any(str(x).lower() == "unknown" for x in pred_scores):
-        print('Score unknown')
-    else:
-        # sort predictions by score descending
-        order = np.argsort(-pred_scores)
-        pred_onsets = pred_onsets[order]
-        pred_offsets = pred_offsets[order]
-        pred_clusters = pred_clusters[order]
-        pred_scores = pred_scores[order]
+    
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
+    
 
     matched_labels = set()
     matched_preds = set()
@@ -596,6 +594,7 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
     )
 
+
     all_preds_final["onset"].extend(final_preds["onset"])
     all_preds_final["offset"].extend(final_preds["offset"])
     all_preds_final["cluster"].extend(final_preds["cluster"])
@@ -787,7 +786,7 @@ if __name__ == "__main__":
     
     #if args.val_ratio > 0:
     #    audio_list_train, audio_list_val, label_list_train, label_list_val = train_test_split(audio_list_train, label_list_train, test_size = args.val_ratio)
-    """
+    
     class_weights, counts = compute_class_weights_from_label_list(
         label_list_train,
         FIXED_CLUSTER_CODEBOOK
@@ -795,8 +794,6 @@ if __name__ == "__main__":
 
     print("Class counts:", counts)
     print("Class weights:", class_weights)
-    """
-    class_weights=None
    
     #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )

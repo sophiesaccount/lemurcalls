@@ -18,7 +18,6 @@ from convert_hf_to_ct2 import convert_hf_to_ct2
 from datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
                        slice_audios_and_labels, train_val_split, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER)
-
 from util.common import EarlyStopHandler, is_scheduled_job
 from util.confusion_framewise import confusion_matrix_framewise
 from utils import *
@@ -46,55 +45,6 @@ torch.cuda.manual_seed_all(SEED)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-def soft_nms_1d_torch(intervals: torch.Tensor, iou_threshold=0.5, sigma=0.5, score_threshold=0.001, method='gaussian'):
-    """
-    Soft-NMS for 1D intervals.
-    
-    intervals: Tensor [N, 3] -> (start, end, score)
-    iou_threshold: IoU threshold for linear method
-    sigma: sigma for gaussian method
-    score_threshold: remove intervals with score < threshold
-    method: 'linear' or 'gaussian'
-    
-    returns: Tensor [M, 3] of kept intervals
-    """
-    if intervals.numel() == 0:
-        return intervals.new_zeros((0,3))
-
-    intervals = intervals.clone()
-    keep = []
-
-    while intervals.numel() > 0:
-        # get the interval with the max score
-        max_idx = torch.argmax(intervals[:,2])
-        current = intervals[max_idx]
-        keep.append(current)
-
-        if intervals.size(0) == 1:
-            break
-
-        rest = torch.cat([intervals[:max_idx], intervals[max_idx+1:]], dim=0)
-
-        # IoU calculation
-        ss = torch.maximum(current[0], rest[:,0])
-        ee = torch.minimum(current[1], rest[:,1])
-        inter = torch.clamp(ee - ss, min=0)
-        union = (current[1]-current[0]) + (rest[:,1]-rest[:,0]) - inter
-        iou = inter / union
-
-        # update scores
-        if method == 'linear':
-            decay = torch.ones_like(iou)
-            mask = iou > iou_threshold
-            decay[mask] = 1 - iou[mask]
-            rest[:,2] *= decay
-        elif method == 'gaussian':
-            rest[:,2] *= torch.exp(- (iou*iou)/sigma)
-
-        # remove intervals with score < threshold
-        intervals = rest[rest[:,2] > score_threshold]
-
-    return torch.stack(keep)
 
 def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
     """
@@ -304,19 +254,16 @@ class EarlyStopping:
                 self.should_stop = True
 
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = None):
+def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = [1,2]):
 
     label_onsets   = labels['onset']
     label_offsets  = labels['offset']
     label_clusters = labels['cluster']
     label_qualities = labels['quality']
 
-    #print(allowed_qualities)
 
-
-    if str(allowed_qualities) != 'None':
+    if allowed_qualities is not None:
         # try to convert everything to int (if possible)
-        #print('Oh Noo')
         try:
             allowed_ints = set(int(q) for q in allowed_qualities)
             label_ints = np.array([int(float(q)) for q in label_qualities])
@@ -330,7 +277,7 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         label_onsets   = np.array(label_onsets)[mask]
         label_offsets  = np.array(label_offsets)[mask]
         label_clusters = np.array(label_clusters)[mask]
-        label_qualities = np.array(label_qualities)[mask]
+
 
     # load predictions
     pred_onsets = np.array(predictions['onset'])
@@ -338,15 +285,12 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     pred_clusters = np.array(predictions['cluster'])
     pred_scores = np.array(predictions['score'])
 
-    if any(str(x).lower() == "unknown" for x in pred_scores):
-        print('Score unknown')
-    else:
-        # sort predictions by score descending
-        order = np.argsort(-pred_scores)
-        pred_onsets = pred_onsets[order]
-        pred_offsets = pred_offsets[order]
-        pred_clusters = pred_clusters[order]
-        pred_scores = pred_scores[order]
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
 
     matched_labels = set()
     matched_preds = set()
@@ -363,22 +307,12 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
             inter = max(0.0, min(pf, lf) - max(po, lo))
             union = max(pf, lf) - min(po, lo)
             ov = inter / union if union > 0 else 0.0
-            if ov > overlap_tolerance and str(pc) == str(lc):
+            if ov > overlap_tolerance:
                 matched_labels.add(l_idx)
                 matched_preds.add(p_idx)
-
-    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
-        for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
-            if l_idx in matched_labels or p_idx in matched_preds:
-                continue
-            inter = max(0.0, min(pf, lf) - max(po, lo))
-            union = max(pf, lf) - min(po, lo)
-            ov = inter / union if union > 0 else 0.0
-            if ov > overlap_tolerance and str(pc) != str(lc):
-                false_class +=1
-                matched_labels.add(l_idx)
-                matched_preds.add(p_idx)
-
+                if str(pc) != str(lc):
+                    false_class += 1
+                break
 
     tp = len(matched_labels) - false_class
     fp = len(pred_onsets) - len(matched_preds)
@@ -395,6 +329,172 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         'precision': precision, 'recall': recall, 'f1': f1
     }
 
+def evaluate_detection_metrics_with_false_class_qualities_q3(labels, predictions, overlap_tolerance, allowed_qualities = [1,2,3]):
+
+    label_onsets   = labels['onset']
+    label_offsets  = labels['offset']
+    label_clusters = labels['cluster']
+    label_qualities = labels['quality']
+
+
+    if allowed_qualities is not None:
+        # try to convert everything to int (if possible)
+        try:
+            allowed_ints = set(int(q) for q in allowed_qualities)
+            label_ints = np.array([int(float(q)) for q in label_qualities])
+            mask = np.array([q in allowed_ints for q in label_ints], dtype=bool)
+        except ValueError:
+            # else use string comparison 
+            allowed_str = set(str(q) for q in allowed_qualities)
+            qual_str = np.array([str(q) for q in label_qualities])
+            mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
+
+        label_onsets   = np.array(label_onsets)[mask]
+        label_offsets  = np.array(label_offsets)[mask]
+        label_clusters = np.array(label_clusters)[mask]
+
+
+    # load predictions
+    pred_onsets = np.array(predictions['onset'])
+    pred_offsets = np.array(predictions['offset'])
+    pred_clusters = np.array(predictions['cluster'])
+    pred_scores = np.array(predictions['score'])
+
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
+
+    matched_labels = set()
+    matched_preds = set()
+    fn_q3 = set()
+    false_class = 0
+
+    gtp = len(label_onsets)     
+    pp  = len(pred_onsets)
+
+    # Matching
+    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
+        for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+            if l_idx in matched_labels or p_idx in matched_preds or lq == '3':
+                continue
+            inter = max(0.0, min(pf, lf) - max(po, lo))
+            union = max(pf, lf) - min(po, lo)
+            ov = inter / union if union > 0 else 0.0
+            if ov > overlap_tolerance:
+                matched_labels.add(l_idx)
+                matched_preds.add(p_idx)
+                if str(pc) != str(lc):
+                    false_class += 1
+                break
+    
+    #check for false negatives with quality class 3
+    for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+        if l_idx in matched_labels:
+            continue
+        if lq == '3':
+            fn_q3.add(l_idx)
+
+    tp = len(matched_labels) - false_class
+    fp = len(pred_onsets) - len(matched_preds) 
+    fn = len(label_onsets) - len(matched_labels) - len(fn_q3) #do not punish false negatives from qc 3
+    fc = false_class
+
+    precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0.0
+    recall    = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0.0
+    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        'gtp': gtp, 'pp': pp,
+        'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
+        'precision': precision, 'recall': recall, 'f1': f1
+    }
+
+
+def evaluate_detection_metrics_with_false_class_qualities_q3_q2(labels, predictions, overlap_tolerance, allowed_qualities = [1,2,3]):
+
+    label_onsets   = labels['onset']
+    label_offsets  = labels['offset']
+    label_clusters = labels['cluster']
+    label_qualities = labels['quality']
+
+
+    if allowed_qualities is not None:
+        # try to convert everything to int (if possible)
+        try:
+            allowed_ints = set(int(q) for q in allowed_qualities)
+            label_ints = np.array([int(float(q)) for q in label_qualities])
+            mask = np.array([q in allowed_ints for q in label_ints], dtype=bool)
+        except ValueError:
+            # else use string comparison 
+            allowed_str = set(str(q) for q in allowed_qualities)
+            qual_str = np.array([str(q) for q in label_qualities])
+            mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
+
+        label_onsets   = np.array(label_onsets)[mask]
+        label_offsets  = np.array(label_offsets)[mask]
+        label_clusters = np.array(label_clusters)[mask]
+
+
+    # load predictions
+    pred_onsets = np.array(predictions['onset'])
+    pred_offsets = np.array(predictions['offset'])
+    pred_clusters = np.array(predictions['cluster'])
+    pred_scores = np.array(predictions['score'])
+
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
+
+    matched_labels = set()
+    matched_preds = set()
+    fn_q3_q2 = set()
+    false_class = 0
+
+    gtp = len(label_onsets)     
+    pp  = len(pred_onsets)
+
+    # Matching
+    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
+        for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+            if l_idx in matched_labels or p_idx in matched_preds or lq == '3' or lq == '2': #quality classes 2 and 3 are not allowed as TPs
+                continue
+            inter = max(0.0, min(pf, lf) - max(po, lo))
+            union = max(pf, lf) - min(po, lo)
+            ov = inter / union if union > 0 else 0.0
+            if ov > overlap_tolerance:
+                matched_labels.add(l_idx)
+                matched_preds.add(p_idx)
+                if str(pc) != str(lc):
+                    false_class += 1
+                break
+    
+    #check for false negatives with quality class 3 or 2
+    for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+        if l_idx in matched_labels:
+            continue
+        if lq == '3' or lq == '2':
+            fn_q3_q2.add(l_idx)
+
+    tp = len(matched_labels) - false_class
+    fp = len(pred_onsets) - len(matched_preds) 
+    fn = len(label_onsets) - len(matched_labels) - len(fn_q3_q2) #do not punish false negatives from qc 3 and 2
+    fc = false_class
+
+    precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0.0
+    recall    = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0.0
+    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        'gtp': gtp, 'pp': pp,
+        'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
+        'precision': precision, 'recall': recall, 'f1': f1
+    }
 
 
 def losses_val(
@@ -596,6 +696,7 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
     )
 
+
     all_preds_final["onset"].extend(final_preds["onset"])
     all_preds_final["offset"].extend(final_preds["offset"])
     all_preds_final["cluster"].extend(final_preds["cluster"])
@@ -603,12 +704,12 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     all_preds_final["orig_idx"].extend(final_preds["orig_idx"])
 
     all_preds, all_labels = group_by_file(all_preds_final, all_labels, metadata_list)
-    #print(f'all_labels: {all_labels}')
+    
     tps, fps, fns, fcs, gtps, pps = [],[],[],[],[],[]
 
     for idx in range(len(all_preds)):
 
-        metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels[idx], all_preds[idx], overlap_tolerance, allowed_qualities = allowed_qualities)
+        metrics = evaluate_detection_metrics_with_false_class_qualities_q3(all_labels[idx], all_preds[idx], overlap_tolerance, allowed_qualities = allowed_qualities)
         tps.append(metrics['tp'])
         fps.append(metrics['fp'])
         fns.append(metrics['fn'])
@@ -692,7 +793,6 @@ if __name__ == "__main__":
     parser.add_argument("--audio_folder" )
     parser.add_argument("--label_folder" )
     parser.add_argument("--label_folder_val" )
-    parser.add_argument("--audio_folder_val" )
     parser.add_argument("--n_device", type = int, default = 1 )
     parser.add_argument("--gpu_list", type = int, nargs = "+", default = None )
     parser.add_argument("--project", default = "wseg-lemur" )
@@ -704,7 +804,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate_per_epoch", type = int, default = 0 )
     parser.add_argument("--save_every", type = int, default = None )
     parser.add_argument("--save_per_epoch", type = int, default = 0 )
-    parser.add_argument("--max_num_epochs", type = int, default = 40 )
+    parser.add_argument("--max_num_epochs", type = int, default = 10 )
     parser.add_argument("--max_num_iterations", type = int, default = None )
     parser.add_argument("--val_ratio", type = float, default = 0 )
     parser.add_argument("--make_equal", nargs="+", default = None )
@@ -714,7 +814,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_head_layers", type = int, default = 2)
 
 
-    parser.add_argument("--patience", type = int, default = 8, help="If the validation score does not improve for [patience] epochs, stop training.")
+    parser.add_argument("--patience", type = int, default = 10, help="If the validation score does not improve for [patience] epochs, stop training.")
     parser.add_argument("--total_spec_columns", type = int, default = 3000 )
     parser.add_argument("--batch_size", type = int, default = 16 )
     parser.add_argument("--learning_rate", type = float, default = 2e-4)
@@ -723,7 +823,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type = float, default = 0.001 )
     parser.add_argument("--warmup_steps", type = int, default = 100 )
     parser.add_argument("--freeze_encoder", type = bool, default = True)
-    parser.add_argument("--dropout", type = float, default = 0.1 )
+    parser.add_argument("--dropout", type = float, default = 0.0 )
     parser.add_argument("--num_workers", type = int, default = 4 )
     parser.add_argument("--num_classes", type = int, default = 3 )
     parser.add_argument("--scheduler_patience", type = int, default = 2)
@@ -732,7 +832,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_decoder", type = bool, default = False)
     parser.add_argument("--T_max", type = int, default = None)
     parser.add_argument("--eta_min", type = float, default = 1e-6)
-    parser.add_argument("--thresholds", type=float, nargs="+", default=[0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85])   
+    parser.add_argument("--threshold", type = float, default = 0.3)
     parser.add_argument("--iou_threshold", type = float, default = 0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
@@ -787,7 +887,7 @@ if __name__ == "__main__":
     
     #if args.val_ratio > 0:
     #    audio_list_train, audio_list_val, label_list_train, label_list_val = train_test_split(audio_list_train, label_list_train, test_size = args.val_ratio)
-    """
+    
     class_weights, counts = compute_class_weights_from_label_list(
         label_list_train,
         FIXED_CLUSTER_CODEBOOK
@@ -795,8 +895,6 @@ if __name__ == "__main__":
 
     print("Class counts:", counts)
     print("Class weights:", class_weights)
-    """
-    class_weights=None
    
     #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
@@ -843,10 +941,6 @@ if __name__ == "__main__":
 
     
 
-    if args.label_folder_val:
-        audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
-            args.audio_folder, args.label_folder_val)
-    
     if args.label_folder_val:
         audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
             args.audio_folder, args.label_folder_val)
@@ -1022,18 +1116,15 @@ if __name__ == "__main__":
         print(f"Epoch {epoch}, Step {count}, Epoch Training Loss: {epoch_train_loss:.4f}")
         print(f"val_ratio = {args.val_ratio}, will run validation: {args.val_ratio > 0}")
 
-        
+        thresholds = [0.4, 0.5, 0.6, 0.7]
         # Validation at the end of each epoch
         if args.val_ratio > 0 or args.label_folder_val:
             print(f"Running validation for epoch {epoch}...")
             f1s, recalls, precisions = [], [], []
-            thresholds = args.thresholds
             for threshold in thresholds:
                 
                 results = actionformer_validation_f1_allclasses(model, val_dataloader, device, args.iou_threshold, threshold, cluster_codebook, args.total_spec_columns, feature_extractor,
                 args.num_classes, args.low_quality_value, args.batch_size, args.num_workers, collate_fn, ID_TO_CLUSTER, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val)
-                pp = results["pp_total"]
-                gtp = results["gtp_total"]
                 f1 = results["f1"]
                 f1s.append(f1)
                 recall = results["recall"]
@@ -1048,9 +1139,9 @@ if __name__ == "__main__":
             print(f1)
             best_threshold = thresholds[np.argmax(f1s)]
             precision = precisions[np.argmax(f1s)]
-            #print(precision)
+            print(precision)
             recall = recalls[np.argmax(f1s)]
-            #print(recall)
+            print(recall)
             print(f"Epoch {epoch}: Val F1 = {f1:.4f} for threshold {best_threshold}")
 
             if args.lr_schedule == "cosine":

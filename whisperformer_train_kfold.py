@@ -337,16 +337,14 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     pred_offsets = np.array(predictions['offset'])
     pred_clusters = np.array(predictions['cluster'])
     pred_scores = np.array(predictions['score'])
-
-    if any(str(x).lower() == "unknown" for x in pred_scores):
-        print('Score unknown')
-    else:
-        # sort predictions by score descending
-        order = np.argsort(-pred_scores)
-        pred_onsets = pred_onsets[order]
-        pred_offsets = pred_offsets[order]
-        pred_clusters = pred_clusters[order]
-        pred_scores = pred_scores[order]
+    
+    # sort predictions by score descending
+    order = np.argsort(-pred_scores)
+    pred_onsets = pred_onsets[order]
+    pred_offsets = pred_offsets[order]
+    pred_clusters = pred_clusters[order]
+    pred_scores = pred_scores[order]
+    
 
     matched_labels = set()
     matched_preds = set()
@@ -573,19 +571,16 @@ def actionformer_validation_loss(model, val_dataloader, device): #NEIN hier ande
 
 
 
-
-def actionformer_validation_f1_allclasses(model, dataloader, device, iou_threshold, threshold, cluster_codebook,total_spec_columns, feature_extractor,
+def actionformer_validation_f1_allclasses(model, dataloader, device, iou_threshold, cluster_codebook,total_spec_columns, feature_extractor,
 num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUSTER, overlap_tolerance, allowed_qualities, all_labels,metadata_list ):
     was_training = model.training
     model.eval()
-
-    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
 
     preds_by_slice = run_inference_new(
     model=model,
     dataloader=dataloader,          # muss mit shuffle=False erstellt sein
     device=device,
-    threshold=threshold,
+    threshold=0,
     iou_threshold=iou_threshold,
     metadata_list=metadata_list     # kommt aus slice_audios_and_labels
     )
@@ -595,6 +590,44 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     total_spec_columns=total_spec_columns,
     ID_TO_CLUSTER=ID_TO_CLUSTER     # aus datautils importiert
     )
+
+    return final_preds
+
+def evaluate(final_preds, threshold, overlap_tolerance, allowed_qualities, all_labels, metadata_list, model ):
+    was_training = model.training
+    model.eval()
+    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    #only preds above threshold
+    #print(final_preds["score"])
+    if "score" in final_preds:
+        filtered = [
+            (on, off, cl, sc, oi)
+            for on, off, cl, sc, oi in zip(
+                final_preds["onset"],
+                final_preds["offset"],
+                final_preds["cluster"],
+                final_preds["score"],
+                final_preds["orig_idx"]
+            )
+            if float(sc) > threshold
+        ]
+        if len(filtered) == 0:
+            final_preds["onset"] = []
+            final_preds["offset"] = []
+            final_preds["cluster"] = []
+            final_preds["score"] = []
+            final_preds["orig_idx"] = []
+        else:
+            (
+                final_preds["onset"],
+                final_preds["offset"],
+                final_preds["cluster"],
+                final_preds["score"],
+                final_preds["orig_idx"]
+            ) = zip(*filtered)
+    else:
+        print("Vorsicht, keine scores in final_preds")
+
 
     all_preds_final["onset"].extend(final_preds["onset"])
     all_preds_final["offset"].extend(final_preds["offset"])
@@ -757,454 +790,458 @@ if __name__ == "__main__":
         
     device = torch.device(  "cuda:%d"%( args.gpu_list[0] ) if torch.cuda.is_available() else "cpu" )
 
-    model = load_actionformer_model(args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
+    label_folder_val_list = ["/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_val_1", "/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_val_2","/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_val_3"]
+    label_folder_list = ["/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_train_1", "/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_train_2","/mnt/lustre-grete/usr/u17327/jsons_final_1/jsons_train_3"]
     
-    if args.freeze_encoder:
-        for para in model.encoder.parameters():
-            para.requires_grad = False
-    else:
-        for para in model.encoder.parameters():
-            para.requires_grad = True
+    for label_folder_val, label_folder in zip(label_folder_val_list, label_folder_list):
 
-
-    if args.audio_folder and args.label_folder:
-        audio_path_list_train, label_path_list_train = get_audio_and_label_paths_from_folders(
-            args.audio_folder, args.label_folder)
-    else:
-        audio_path_list_train, label_path_list_train = get_audio_and_label_paths(args.train_dataset_folder)
-    
-    # Split paths before loading
-    if args.val_ratio > 0:
-        audio_path_list_train, audio_path_list_val, label_path_list_train, label_path_list_val = train_test_split(
-            audio_path_list_train, label_path_list_train, test_size=args.val_ratio, random_state=42)
-    else:
-        audio_path_list_train, label_path_list_train = audio_path_list_train, label_path_list_train
-        audio_path_list_val, label_path_list_val = [], []
-
-    cluster_codebook = FIXED_CLUSTER_CODEBOOK
-
-    audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 1 )
-    
-    #if args.val_ratio > 0:
-    #    audio_list_train, audio_list_val, label_list_train, label_list_val = train_test_split(audio_list_train, label_list_train, test_size = args.val_ratio)
-    """
-    class_weights, counts = compute_class_weights_from_label_list(
-        label_list_train,
-        FIXED_CLUSTER_CODEBOOK
-    )
-
-    print("Class counts:", counts)
-    print("Class weights:", class_weights)
-    """
-    class_weights=None
-   
-    #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
-    audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
-    print(f"Created {len(audio_list_train)} training samples after slicing") 
-
-    feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
-    #feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-
-    ### Handle Validation Set ###
-    if args.val_ratio > 0:
-        audio_list_val, label_list_val = load_data(audio_path_list_val, label_path_list_val, cluster_codebook = cluster_codebook, n_threads = 1 )
-
-        audio_list_val, label_list_val, metadata_list_val = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
-        print(f"Created {len(audio_list_val)} validation samples after slicing")
-
-        # Create validation dataloader
-        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
-        val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
-                                        num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False) 
+        model = load_actionformer_model(args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
         
-        #---- get labels for calculation of F1 val score ----#
-        all_labels = {"onset": [], "offset": [], "cluster": [], "quality": [], "orig_idx": []}
-        # Labels laden
-        for i, label_path in enumerate(label_path_list_val):
-            with open(label_path, "r") as f:
-                labels = json.load(f)
-            
-            clusters = labels["cluster"]
-            labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
-            
+        if args.freeze_encoder:
+            for para in model.encoder.parameters():
+                para.requires_grad = False
+        else:
+            for para in model.encoder.parameters():
+                para.requires_grad = True
 
-            # Quality-Klassen hinzufügen
-            if "quality" in labels:
-                quality_list = labels["quality"]
-            else:
-                quality_list = ["unknown"] * len(labels["onset"])
 
-            # --- globale Sammler befüllen ---
-            all_labels["onset"].extend(labels["onset"])
-            all_labels["offset"].extend(labels["offset"])
-            all_labels["cluster"].extend(labels["cluster"])
-            all_labels["quality"].extend(quality_list)
-            all_labels["orig_idx"].extend([i for _ in range(len(labels["onset"]))])
+        if args.audio_folder and args.label_folder:
+            audio_path_list_train, label_path_list_train = get_audio_and_label_paths_from_folders(
+                args.audio_folder, label_folder)
+        else:
+            audio_path_list_train, label_path_list_train = get_audio_and_label_paths(args.train_dataset_folder)
+        
+        # Split paths before loading
+        if args.val_ratio > 0:
+            audio_path_list_train, audio_path_list_val, label_path_list_train, label_path_list_val = train_test_split(
+                audio_path_list_train, label_path_list_train, test_size=args.val_ratio, random_state=42)
+        else:
+            audio_path_list_train, label_path_list_train = audio_path_list_train, label_path_list_train
+            audio_path_list_val, label_path_list_val = [], []
 
+        cluster_codebook = FIXED_CLUSTER_CODEBOOK
+
+        audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 1 )
+        
+        #if args.val_ratio > 0:
+        #    audio_list_train, audio_list_val, label_list_train, label_list_val = train_test_split(audio_list_train, label_list_train, test_size = args.val_ratio)
+        
+        class_weights, counts = compute_class_weights_from_label_list(
+            label_list_train,
+            FIXED_CLUSTER_CODEBOOK
+        )
+
+        print("Class counts:", counts)
+        print("Class weights:", class_weights)
     
+        #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
+        audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
+        print(f"Created {len(audio_list_train)} training samples after slicing") 
 
-    if args.label_folder_val:
-        audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
-            args.audio_folder, args.label_folder_val)
-    
-    if args.label_folder_val:
-        audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
-            args.audio_folder, args.label_folder_val)
+        feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
+        #feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
 
-        audio_list_val, label_list_val = load_data(audio_path_list_val, label_path_list_val, cluster_codebook = cluster_codebook, n_threads = 1 )
+        ### Handle Validation Set ###
+        if args.val_ratio > 0:
+            audio_list_val, label_list_val = load_data(audio_path_list_val, label_path_list_val, cluster_codebook = cluster_codebook, n_threads = 1 )
 
-        audio_list_val, label_list_val, metadata_list_val = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
-        print(f"Created {len(audio_list_val)} validation samples after slicing")
+            audio_list_val, label_list_val, metadata_list_val = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
+            print(f"Created {len(audio_list_val)} validation samples after slicing")
 
-        # Create validation dataloader
-        val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
-        val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
-                                        num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
-
-        #---- get labels for calculation of F1 val score ----#
-        all_labels = {"onset": [], "offset": [], "cluster": [], "quality": [], "orig_idx": []}
-        # Labels laden
-        for i, label_path in enumerate(label_path_list_val):
-            with open(label_path, "r") as f:
-                labels = json.load(f)
+            # Create validation dataloader
+            val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
+            val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
+                                            num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False) 
             
-            clusters = labels["cluster"]
-            labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
-            
-
-            # Quality-Klassen hinzufügen
-            if "quality" in labels:
-                quality_list = labels["quality"]
-            else:
-                quality_list = ["unknown"] * len(labels["onset"])
-
-            # --- globale Sammler befüllen ---
-            all_labels["onset"].extend(labels["onset"])
-            all_labels["offset"].extend(labels["offset"])
-            all_labels["cluster"].extend(labels["cluster"])
-            all_labels["quality"].extend(quality_list)
-            all_labels["orig_idx"].extend([i for _ in range(len(labels["onset"]))])
-
-    # Check if we have any data after slicing
-    if len(audio_list_train) == 0:
-        print("Error: No valid audio samples after slicing!")
-        print("This could be due to:")
-        print("  - Audio files that are too short after slicing")
-        print("  - No valid segments in the labels")
-        print("  - All segments being filtered out during processing")
-        sys.exit(1)
-
-
-    training_dataset = WhisperFormerDatasetQuality(audio_list_train, label_list_train, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
-
-    # Check dataset size before creating DataLoader
-    if len(training_dataset) == 0:
-        print("Error: Training dataset has 0 samples!")
-        sys.exit(1)
-    
-    if len(training_dataset) < args.batch_size:
-        print(f"Warning: Dataset size ({len(training_dataset)}) is smaller than batch size ({args.batch_size})")
-        print("Consider reducing batch size or adding more data")
-
-    training_dataloader = DataLoader( training_dataset, batch_size = args.batch_size , shuffle = True , 
-                                             worker_init_fn = None, 
-                                             num_workers = args.num_workers , drop_last= True,
-                                             pin_memory = False,
-                                             collate_fn = collate_fn
-                                           )
-
-    if len(training_dataloader) == 0:
-        print("Error: Too few examples (less than a batch) for training! Exit!")
-        sys.exit(1)
-
-
-    if args.max_num_iterations is not None and args.max_num_iterations > 0:
-        args.max_num_epochs = int(np.ceil( args.max_num_iterations / len( training_dataloader )  ))
-    else:
-        assert args.max_num_epochs is not None and args.max_num_epochs > 0
-        args.max_num_iterations = len( training_dataloader ) * args.max_num_epochs
+            #---- get labels for calculation of F1 val score ----#
+            all_labels = {"onset": [], "offset": [], "cluster": [], "quality": [], "orig_idx": []}
+            # Labels laden
+            for i, label_path in enumerate(label_path_list_val):
+                with open(label_path, "r") as f:
+                    labels = json.load(f)
+                
+                clusters = labels["cluster"]
+                labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
                 
 
-    model = nn.DataParallel( model, args.gpu_list )
-    model = model.to(device)
+                # Quality-Klassen hinzufügen
+                if "quality" in labels:
+                    quality_list = labels["quality"]
+                else:
+                    quality_list = ["unknown"] * len(labels["onset"])
 
-
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-    
-    optimizer = AdamW(optimizer_grouped_parameters, lr = args.learning_rate )
-
-    #initialize the different lr schedulers
-    if args.lr_schedule == "linear":
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps= args.warmup_steps, 
-            num_training_steps = args.max_num_iterations
-        )
-    elif args.lr_schedule == "plateau":
-        scheduler = ReduceLROnPlateau(
-            optimizer,
-            mode="min",               # or "max" if you monitor accuracy/score
-            factor=args.factor,               # reduce LR by half
-            patience=args.scheduler_patience,               # number of evals with no improvement before reducing
-            verbose=True
-        )
-    elif args.lr_schedule == "cosine":
-        T_max = args.T_max if args.T_max is not None else args.max_num_epochs
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=T_max,
-            eta_min=args.eta_min
-        )
-        
-    else:
-        scheduler = None
-    
-    scaler = torch.cuda.amp.GradScaler()
-
-    val_score_history = []
-    early_stopper = None
-    if args.use_early_stopping:
-        early_stopper = EarlyStopping(patience=args.patience, min_delta=0.0)
-
-    early_stop = False
-    current_step = 0
-
-    train_loss_history = []
-    train_loss_history_class=[]
-    train_loss_history_reg=[]
-    val_loss_history = []
-    val_loss_history_class = []
-    val_loss_history_reg = []
-    lr_reduction_epochs = []
-    f1_scores_val = []
-    f1_scores_val_m = []
-    recall_scores_val = []
-    precision_scores_val = []
-    best_f1 = 0.0
-    best_metrics = {}           
-
-    best_model_state_dict = model.module.state_dict()  # initial save
-    #best_model_state_dict = model.state_dict()
-
-
-    for epoch in range(args.max_num_epochs+1):  
-        print(f"\n=== Starting Epoch {epoch} ===")
-        model.train() 
-
-        training_losses = []
-        training_losses_class = []
-        training_losses_reg = []
-        val_losses = []
-        lrs=[]
-
-        for count, batch in enumerate( tqdm( training_dataloader, desc=f'epoch-{epoch:03}', disable=is_scheduled_job()) ):
-            cls_loss, reg_loss, total_loss = actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, device)
-            training_losses.append(total_loss)
-            training_losses_class.append(cls_loss)
-            training_losses_reg.append(reg_loss)
-
-            if count % 100 == 0:
-                print(f"Epoch {epoch}, Step {count}, Training Total Loss: {total_loss:.4f}")
-                print(f"Epoch {epoch}, Step {count}, Training Class Loss: {cls_loss:.4f}")
-                print(f"Epoch {epoch}, Step {count}, Training Regression Loss: {reg_loss:.4f}")
-                
-
-        print(f"=== End of Epoch {epoch} ===")
-        epoch_train_loss = sum(training_losses)/len(training_losses)
-        epoch_train_loss_class = sum(training_losses_class)/len(training_losses_class)
-        epoch_train_loss_reg = sum(training_losses_reg)/len(training_losses_reg)
-        train_loss_history.append(epoch_train_loss)
-        train_loss_history_class.append(epoch_train_loss_class)
-        train_loss_history_reg.append(epoch_train_loss_reg)
-        print(f"Epoch {epoch}, Step {count}, Epoch Training Loss: {epoch_train_loss:.4f}")
-        print(f"val_ratio = {args.val_ratio}, will run validation: {args.val_ratio > 0}")
+                # --- globale Sammler befüllen ---
+                all_labels["onset"].extend(labels["onset"])
+                all_labels["offset"].extend(labels["offset"])
+                all_labels["cluster"].extend(labels["cluster"])
+                all_labels["quality"].extend(quality_list)
+                all_labels["orig_idx"].extend([i for _ in range(len(labels["onset"]))])
 
         
-        # Validation at the end of each epoch
-        if args.val_ratio > 0 or args.label_folder_val:
-            print(f"Running validation for epoch {epoch}...")
-            f1s, recalls, precisions = [], [], []
-            thresholds = args.thresholds
-            for threshold in thresholds:
+
+        if args.label_folder_val:
+            audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
+                args.audio_folder, label_folder_val)
+        
+        if args.label_folder_val:
+            audio_path_list_val, label_path_list_val = get_audio_and_label_paths_from_folders(
+                args.audio_folder, label_folder_val)
+
+            audio_list_val, label_list_val = load_data(audio_path_list_val, label_path_list_val, cluster_codebook = cluster_codebook, n_threads = 1 )
+
+            audio_list_val, label_list_val, metadata_list_val = slice_audios_and_labels( audio_list_val, label_list_val, args.total_spec_columns )
+            print(f"Created {len(audio_list_val)} validation samples after slicing")
+
+            # Create validation dataloader
+            val_dataset = WhisperFormerDatasetQuality(audio_list_val, label_list_val, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
+            val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
+                                            num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False)
+
+            #---- get labels for calculation of F1 val score ----#
+            all_labels = {"onset": [], "offset": [], "cluster": [], "quality": [], "orig_idx": []}
+            # Labels laden
+            for i, label_path in enumerate(label_path_list_val):
+                with open(label_path, "r") as f:
+                    labels = json.load(f)
                 
-                results = actionformer_validation_f1_allclasses(model, val_dataloader, device, args.iou_threshold, threshold, cluster_codebook, args.total_spec_columns, feature_extractor,
+                clusters = labels["cluster"]
+                labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
+                
+
+                # Quality-Klassen hinzufügen
+                if "quality" in labels:
+                    quality_list = labels["quality"]
+                else:
+                    quality_list = ["unknown"] * len(labels["onset"])
+
+                # --- globale Sammler befüllen ---
+                all_labels["onset"].extend(labels["onset"])
+                all_labels["offset"].extend(labels["offset"])
+                all_labels["cluster"].extend(labels["cluster"])
+                all_labels["quality"].extend(quality_list)
+                all_labels["orig_idx"].extend([i for _ in range(len(labels["onset"]))])
+
+        # Check if we have any data after slicing
+        if len(audio_list_train) == 0:
+            print("Error: No valid audio samples after slicing!")
+            print("This could be due to:")
+            print("  - Audio files that are too short after slicing")
+            print("  - No valid segments in the labels")
+            print("  - All segments being filtered out during processing")
+            sys.exit(1)
+
+
+        training_dataset = WhisperFormerDatasetQuality(audio_list_train, label_list_train, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
+
+        # Check dataset size before creating DataLoader
+        if len(training_dataset) == 0:
+            print("Error: Training dataset has 0 samples!")
+            sys.exit(1)
+        
+        if len(training_dataset) < args.batch_size:
+            print(f"Warning: Dataset size ({len(training_dataset)}) is smaller than batch size ({args.batch_size})")
+            print("Consider reducing batch size or adding more data")
+
+        training_dataloader = DataLoader( training_dataset, batch_size = args.batch_size , shuffle = True , 
+                                                worker_init_fn = None, 
+                                                num_workers = args.num_workers , drop_last= True,
+                                                pin_memory = False,
+                                                collate_fn = collate_fn
+                                            )
+
+        if len(training_dataloader) == 0:
+            print("Error: Too few examples (less than a batch) for training! Exit!")
+            sys.exit(1)
+
+
+        if args.max_num_iterations is not None and args.max_num_iterations > 0:
+            args.max_num_epochs = int(np.ceil( args.max_num_iterations / len( training_dataloader )  ))
+        else:
+            assert args.max_num_epochs is not None and args.max_num_epochs > 0
+            args.max_num_iterations = len( training_dataloader ) * args.max_num_epochs
+                    
+
+        model = nn.DataParallel( model, args.gpu_list )
+        model = model.to(device)
+
+
+        no_decay = ['bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': args.weight_decay},
+            {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+        
+        optimizer = AdamW(optimizer_grouped_parameters, lr = args.learning_rate )
+
+        #initialize the different lr schedulers
+        if args.lr_schedule == "linear":
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps= args.warmup_steps, 
+                num_training_steps = args.max_num_iterations
+            )
+        elif args.lr_schedule == "plateau":
+            scheduler = ReduceLROnPlateau(
+                optimizer,
+                mode="min",               # or "max" if you monitor accuracy/score
+                factor=args.factor,               # reduce LR by half
+                patience=args.scheduler_patience,               # number of evals with no improvement before reducing
+                verbose=True
+            )
+        elif args.lr_schedule == "cosine":
+            T_max = args.T_max if args.T_max is not None else args.max_num_epochs
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=T_max,
+                eta_min=args.eta_min
+            )
+            
+        else:
+            scheduler = None
+        
+        scaler = torch.cuda.amp.GradScaler()
+
+        val_score_history = []
+        early_stopper = None
+        if args.use_early_stopping:
+            early_stopper = EarlyStopping(patience=args.patience, min_delta=0.0)
+
+        early_stop = False
+        current_step = 0
+
+        train_loss_history = []
+        train_loss_history_class=[]
+        train_loss_history_reg=[]
+        val_loss_history = []
+        val_loss_history_class = []
+        val_loss_history_reg = []
+        lr_reduction_epochs = []
+        f1_scores_val = []
+        f1_scores_val_m = []
+        recall_scores_val = []
+        precision_scores_val = []
+        best_f1 = 0.0
+        best_metrics = {}           
+
+        best_model_state_dict = model.module.state_dict()  # initial save
+        #best_model_state_dict = model.state_dict()
+
+
+        for epoch in range(args.max_num_epochs+1):  
+            print(f"\n=== Starting Epoch {epoch} ===")
+            model.train() 
+
+            training_losses = []
+            training_losses_class = []
+            training_losses_reg = []
+            val_losses = []
+            lrs=[]
+
+            for count, batch in enumerate( tqdm( training_dataloader, desc=f'epoch-{epoch:03}', disable=is_scheduled_job()) ):
+                cls_loss, reg_loss, total_loss = actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, device)
+                training_losses.append(total_loss)
+                training_losses_class.append(cls_loss)
+                training_losses_reg.append(reg_loss)
+
+                if count % 100 == 0:
+                    print(f"Epoch {epoch}, Step {count}, Training Total Loss: {total_loss:.4f}")
+                    print(f"Epoch {epoch}, Step {count}, Training Class Loss: {cls_loss:.4f}")
+                    print(f"Epoch {epoch}, Step {count}, Training Regression Loss: {reg_loss:.4f}")
+                    
+
+            print(f"=== End of Epoch {epoch} ===")
+            epoch_train_loss = sum(training_losses)/len(training_losses)
+            epoch_train_loss_class = sum(training_losses_class)/len(training_losses_class)
+            epoch_train_loss_reg = sum(training_losses_reg)/len(training_losses_reg)
+            train_loss_history.append(epoch_train_loss)
+            train_loss_history_class.append(epoch_train_loss_class)
+            train_loss_history_reg.append(epoch_train_loss_reg)
+            print(f"Epoch {epoch}, Step {count}, Epoch Training Loss: {epoch_train_loss:.4f}")
+            print(f"val_ratio = {args.val_ratio}, will run validation: {args.val_ratio > 0}")
+
+            
+            # Validation at the end of each epoch
+            if args.val_ratio > 0 or args.label_folder_val:
+                print(f"Running validation for epoch {epoch}...")
+                f1s, recalls, precisions = [], [], []
+                thresholds = args.thresholds
+                final_preds = actionformer_validation_f1_allclasses(model, val_dataloader, device, args.iou_threshold, cluster_codebook, args.total_spec_columns, feature_extractor,
                 args.num_classes, args.low_quality_value, args.batch_size, args.num_workers, collate_fn, ID_TO_CLUSTER, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val)
-                pp = results["pp_total"]
-                gtp = results["gtp_total"]
-                f1 = results["f1"]
-                f1s.append(f1)
-                recall = results["recall"]
-                recalls.append(recall)
-                precision = results["precision"]
-                precisions.append(precision)
+                for threshold in thresholds:
+                    results = evaluate(final_preds, threshold, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val, model)
+                    pp = results["pp_total"]
+                    gtp = results["gtp_total"]
+                    f1 = results["f1"]
+                    f1s.append(f1)
+                    recall = results["recall"]
+                    recalls.append(recall)
+                    precision = results["precision"]
+                    precisions.append(precision)
 
-            f1_scores_val.append(f1s)
-            recall_scores_val.append(recalls)
-            precision_scores_val.append(precisions)
-            f1 = np.max(f1s)
-            print(f1)
-            best_threshold = thresholds[np.argmax(f1s)]
-            precision = precisions[np.argmax(f1s)]
-            #print(precision)
-            recall = recalls[np.argmax(f1s)]
-            #print(recall)
-            print(f"Epoch {epoch}: Val F1 = {f1:.4f} for threshold {best_threshold}")
+                f1_scores_val.append(f1s)
+                recall_scores_val.append(recalls)
+                precision_scores_val.append(precisions)
+                f1 = np.max(f1s)
+                print(f1)
+                best_threshold = thresholds[np.argmax(f1s)]
+                precision = precisions[np.argmax(f1s)]
+                #print(precision)
+                recall = recalls[np.argmax(f1s)]
+                #print(recall)
+                print(f"Epoch {epoch}: Val F1 = {f1:.4f} for threshold {best_threshold}")
 
-            if args.lr_schedule == "cosine":
-                if epoch >5:
+                if args.lr_schedule == "cosine":
+                    if epoch >5:
+                        old_lr = get_lr(optimizer)[0]
+                        scheduler.step()
+                        new_lr = get_lr(optimizer)[0]
+                        if new_lr < old_lr:
+                            print(f"LR reduced from {old_lr:.2e} to {new_lr:.2e} at epoch {epoch}")
+                            lr_reduction_epochs.append((epoch, new_lr))
+
+                elif args.lr_schedule == "plateau":
                     old_lr = get_lr(optimizer)[0]
-                    scheduler.step()
+                    scheduler.step(1 - f1)
                     new_lr = get_lr(optimizer)[0]
                     if new_lr < old_lr:
                         print(f"LR reduced from {old_lr:.2e} to {new_lr:.2e} at epoch {epoch}")
                         lr_reduction_epochs.append((epoch, new_lr))
 
-            elif args.lr_schedule == "plateau":
-                old_lr = get_lr(optimizer)[0]
-                scheduler.step(1 - f1)
-                new_lr = get_lr(optimizer)[0]
-                if new_lr < old_lr:
-                    print(f"LR reduced from {old_lr:.2e} to {new_lr:.2e} at epoch {epoch}")
-                    lr_reduction_epochs.append((epoch, new_lr))
 
 
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_model_state_dict = copy.deepcopy(model.module.state_dict())
+                    #best_model_state_dict = copy.deepcopy(model.state_dict())
+                    best_metrics = {
+                    "epoch": epoch,
+                    "f1": f1,
+                    "precision": precision,
+                    "recall": recall,
+                    "threshold": best_threshold
+                        }
+                
+                if early_stopper is not None:
+                    early_stopper.step(1 - f1)
 
-            if f1 > best_f1:
-                best_f1 = f1
-                best_model_state_dict = copy.deepcopy(model.module.state_dict())
-                #best_model_state_dict = copy.deepcopy(model.state_dict())
-                best_metrics = {
-                "epoch": epoch,
-                "f1": f1,
-                "precision": precision,
-                "recall": recall,
-                "threshold": best_threshold
-                    }
-            
-            if early_stopper is not None:
-                early_stopper.step(1 - f1)
+                    if early_stopper.should_stop:
+                        print(f"Early stopping triggered at epoch {epoch}. "
+                            f"Validation loss did not improve for {args.patience} epochs.")
+                        break
 
-                if early_stopper.should_stop:
-                    print(f"Early stopping triggered at epoch {epoch}. "
-                        f"Validation loss did not improve for {args.patience} epochs.")
-                    break
+            else:
+                print(f"No validation set (val_ratio = {args.val_ratio})")
 
+            if current_step >= args.max_num_epochs:
+                break
+
+        # Save final model
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #final_model_save_path = f"{args.model_folder}/final_model_{timestamp}"
+        dataset_name = os.path.basename(label_folder_val.rstrip("/"))
+        final_model_save_path = os.path.join(args.model_folder, f"final_model_{dataset_name}_{timestamp}")
+        # Save ActionFormer model
+        
+        os.makedirs(final_model_save_path, exist_ok=True)
+
+        #plot the losses
+            # === Plot Loss Curves ===
+        plt.figure(figsize=(8, 5))
+        plt.plot(train_loss_history, label="Training Loss")
+        plt.plot(train_loss_history_class, label="Training Loss Class")
+        plt.plot(train_loss_history_reg, label="Training Loss Regression")
+        for i in range(len(thresholds)):
+            plt.plot([sublist[i] for sublist in f1_scores_val], label=f"Validation F1 for threshold {thresholds[i]}")
+            #plt.plot(f1_scores_val_m, label="Validation F1 Moan")
+            #plt.plot([sublist[i] for sublist in recall_scores_val], label=f"Validation Recall for threshold {thresholds[i]}")
+            #plt.plot([sublist[i] for sublist in precision_scores_val], label=f"Validation Precision for threshold {thresholds[i]}")
+        
+        # Vertikale Linien für LR-Reduktionen
+        for epoch_idx, lr_val in lr_reduction_epochs:
+            plt.axvline(x=epoch_idx, color="k", linestyle="--", alpha=0.7)
+            plt.text(epoch_idx, max(train_loss_history), f"LR={lr_val:.1e}",
+                    rotation=90, verticalalignment="bottom", fontsize=8, color="k")
+
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Training and Validation Loss")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+
+        # Save plot
+        loss_plot_path = os.path.join(final_model_save_path, "loss_curve.png")
+        plt.savefig(loss_plot_path)
+        print("Saved loss curve to:", loss_plot_path)
+        plt.close()
+
+        torch.save(best_model_state_dict, f"{final_model_save_path}/best_model.pth")
+        print("Best model saved according to early stopping.")
+
+
+        # Save training arguments
+        params_path = os.path.join(final_model_save_path, "training_args.json")
+        with open(params_path, "w") as f:
+            json.dump(vars(args), f, indent=4)
+        
+        # Beste Validierungsergebnisse speichern
+        metrics_path = os.path.join(final_model_save_path, "best_val_metrics.json")
+        with open(metrics_path, "w") as f:
+            json.dump(best_metrics, f, indent=4)
+
+        print(f"✅ Best validation metrics saved to {metrics_path}")
+
+        # Pfad zur CSV-Datei
+        csv_path = os.path.join(args.model_folder, "runs.csv")
+
+        
+        # Zeitstempel im Format YYYY-MM-DD HH:MM:SS
+        run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Argumente in ein dict umwandeln (falls argparse.Namespace)
+        if hasattr(args, "__dict__"):
+            args_dict = vars(args)
         else:
-            print(f"No validation set (val_ratio = {args.val_ratio})")
+            args_dict = dict(args)
 
-        if current_step >= args.max_num_epochs:
-            break
+        # Spaltennamen: zuerst "timestamp", dann alle Argument-Namen
+        fieldnames = ["timestamp"] + list(args_dict.keys())
 
-    # Save final model
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    final_model_save_path = f"{args.model_folder}/final_model_{timestamp}"
-    
-    # Save ActionFormer model
-    
-    os.makedirs(final_model_save_path, exist_ok=True)
+        # Prüfen, ob Datei existiert
+        file_exists = os.path.isfile(csv_path)
 
-    #plot the losses
-        # === Plot Loss Curves ===
-    plt.figure(figsize=(8, 5))
-    plt.plot(train_loss_history, label="Training Loss")
-    plt.plot(train_loss_history_class, label="Training Loss Class")
-    plt.plot(train_loss_history_reg, label="Training Loss Regression")
-    for i in range(len(thresholds)):
-        plt.plot([sublist[i] for sublist in f1_scores_val], label=f"Validation F1 for threshold {thresholds[i]}")
-        #plt.plot(f1_scores_val_m, label="Validation F1 Moan")
-        #plt.plot([sublist[i] for sublist in recall_scores_val], label=f"Validation Recall for threshold {thresholds[i]}")
-        #plt.plot([sublist[i] for sublist in precision_scores_val], label=f"Validation Precision for threshold {thresholds[i]}")
-    
-    # Vertikale Linien für LR-Reduktionen
-    for epoch_idx, lr_val in lr_reduction_epochs:
-        plt.axvline(x=epoch_idx, color="k", linestyle="--", alpha=0.7)
-        plt.text(epoch_idx, max(train_loss_history), f"LR={lr_val:.1e}",
-                rotation=90, verticalalignment="bottom", fontsize=8, color="k")
+        # CSV schreiben/ergänzen
+        with open(csv_path, mode="a", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Training and Validation Loss")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
+            # Falls neue Datei → Header schreiben
+            if not file_exists:
+                writer.writeheader()
 
-    # Save plot
-    loss_plot_path = os.path.join(final_model_save_path, "loss_curve.png")
-    plt.savefig(loss_plot_path)
-    print("Saved loss curve to:", loss_plot_path)
-    plt.close()
+            # Zeile mit Zeit + Argumenten schreiben
+            row = {"timestamp": run_time}
+            row.update(args_dict)
+            writer.writerow(row)
 
-    torch.save(best_model_state_dict, f"{final_model_save_path}/best_model.pth")
-    print("Best model saved according to early stopping.")
+        print(f"Run wurde in {csv_path} protokolliert.")
+
+        # Pfad zur CSV-Datei
+        csv_path = os.path.join(args.model_folder, "runs.csv")
+
+        # Wenn die Datei noch nicht existiert, Header schreiben
+        file_exists = os.path.isfile(csv_path)
+
+        # Öffne CSV im Append-Modus
+        with open(csv_path, "a", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=list(best_metrics.keys()))
+            
+            if not file_exists:
+                # Header nur schreiben, wenn die Datei neu ist
+                writer.writeheader()
+            
+            # Werte der besten Metrics als neue Zeile eintragen
+            writer.writerow(best_metrics)
+
+        print(f"✅ Best metrics also appended to {csv_path}")
 
 
-    # Save training arguments
-    params_path = os.path.join(final_model_save_path, "training_args.json")
-    with open(params_path, "w") as f:
-        json.dump(vars(args), f, indent=4)
-    
-    # Beste Validierungsergebnisse speichern
-    metrics_path = os.path.join(final_model_save_path, "best_val_metrics.json")
-    with open(metrics_path, "w") as f:
-        json.dump(best_metrics, f, indent=4)
-
-    print(f"✅ Best validation metrics saved to {metrics_path}")
-
-    # Pfad zur CSV-Datei
-    csv_path = os.path.join(args.model_folder, "runs.csv")
-
-    
-    # Zeitstempel im Format YYYY-MM-DD HH:MM:SS
-    run_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Argumente in ein dict umwandeln (falls argparse.Namespace)
-    if hasattr(args, "__dict__"):
-        args_dict = vars(args)
-    else:
-        args_dict = dict(args)
-
-    # Spaltennamen: zuerst "timestamp", dann alle Argument-Namen
-    fieldnames = ["timestamp"] + list(args_dict.keys())
-
-    # Prüfen, ob Datei existiert
-    file_exists = os.path.isfile(csv_path)
-
-    # CSV schreiben/ergänzen
-    with open(csv_path, mode="a", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-        # Falls neue Datei → Header schreiben
-        if not file_exists:
-            writer.writeheader()
-
-        # Zeile mit Zeit + Argumenten schreiben
-        row = {"timestamp": run_time}
-        row.update(args_dict)
-        writer.writerow(row)
-
-    print(f"Run wurde in {csv_path} protokolliert.")
-
-    # Pfad zur CSV-Datei
-    csv_path = os.path.join(args.model_folder, "runs.csv")
-
-    # Wenn die Datei noch nicht existiert, Header schreiben
-    file_exists = os.path.isfile(csv_path)
-
-    # Öffne CSV im Append-Modus
-    with open(csv_path, "a", newline="") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=list(best_metrics.keys()))
-        
-        if not file_exists:
-            # Header nur schreiben, wenn die Datei neu ist
-            writer.writeheader()
-        
-        # Werte der besten Metrics als neue Zeile eintragen
-        writer.writerow(best_metrics)
-
-    print(f"✅ Best metrics also appended to {csv_path}")
-
-
-        
+            
