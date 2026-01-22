@@ -161,8 +161,22 @@ cython_debug/
 
 results/
 model_folder/
+best_models/
+best_model/
+model_folder_last/
+old_data/
+experiments/
+snr_val/
+SNRR/
+jobs/
+model_folder_ben/
+model_folder_final/
+model_folder_new/
+whisper_models/
+whisper_size/
+segments.pt
 
-final_checkpoint_ct2/
+#final_checkpoint_ct2/
 
 experiments/
 
@@ -170,23 +184,8 @@ experiments/
 *.jsonr
 *.wav
 *.txt
-final_checkpoint_ct2/model.bin
-wandb/latest-run
-wandb/run-20250627_222002-53cicrvf/run-53cicrvf.wandb
-wandb/run-20250627_222002-53cicrvf/files/config.yaml
-wandb/run-20250627_224252-l1w6rq87/run-l1w6rq87.wandb
-wandb/run-20250627_224252-l1w6rq87/files/config.yaml
-wandb/run-20250627_225702-dw6839jd/run-dw6839jd.wandb
-wandb/run-20250627_225702-dw6839jd/files/config.yaml
-wandb/run-20250627_230401-ttfyf11h/run-ttfyf11h.wandb
-wandb/run-20250627_230401-ttfyf11h/files/config.yaml
-wandb/run-20250627_231140-g5jy2ukq/run-g5jy2ukq.wandb
-wandb/run-20250627_231140-g5jy2ukq/files/config.yaml
-wandb/run-20250627_231801-k7paowoe/run-k7paowoe.wandb
-wandb/run-20250627_231801-k7paowoe/files/config.yaml
-wandb/run-20250627_233203-hcaczwrf/run-hcaczwrf.wandb
-wandb/run-20250627_233203-hcaczwrf/files/config.yaml
-wandb/run-20250627_233832-arfe9zqz/run-arfe9zqz.wandb
-wandb/run-20250627_233832-arfe9zqz/files/config.yaml
-wandb/run-20250627_234758-gfchiw8e/run-gfchiw8e.wandb
-wandb/run-20250627_234758-gfchiw8e/files/config.yaml
+*.wandb
+*.png
+wandb/
+*.csv
+tests/
