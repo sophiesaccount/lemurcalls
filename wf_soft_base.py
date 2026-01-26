@@ -36,6 +36,8 @@ from collections import defaultdict
 import random
 import contextlib
 from collections import defaultdict
+from transformers import WhisperModel
+
 
 
 SEED = 66100
@@ -559,21 +561,22 @@ def losses_val(
 
 
 
-def load_actionformer_model(initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
+def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
     """Load ActionFormer model with Whisper encoder"""
-    from transformers import WhisperModel
     
-    # Load Whisper encoder #????this should be part of the model already!
-    #whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
-    #whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-    whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
+    if whisper_size == "large":
+        whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
+    elif whisper_size == "base":
+        whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
+    else:
+        raise ValueError(f"Invalid whisper size: {whisper_size}")
 
     encoder = whisper_model.encoder
     
     # Create WhisperFormer model with the correct number of classes
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
+    model = WhisperFormer(whisper_size=args.whisper_size, encoder=encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
     
-    # Load pretrained weights if available
+    # Load pretrained weights if available ACHTUNG RICHTIGE GRÖSSE TESTEN!
     if initial_model_path and os.path.exists(initial_model_path):
         print(f"Loading pretrained weights from {initial_model_path}")
         model.load_state_dict(torch.load(initial_model_path, map_location='cpu'))
@@ -602,7 +605,19 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
         class_preds, regr_preds = model(batch["input_features"])
 
         # Compute loss
-        cls_loss, reg_loss, total_loss = losses_val(
+        if args.class_weights == True:
+            cls_loss, reg_loss, total_loss = losses_val(
+                class_preds,
+                regr_preds,
+                batch['clusters'],
+                batch['segments'],
+                loss_normalizer=200.0,
+                loss_normalizer_momentum=0.8,
+                train_loss_weight=args.train_loss_weight,
+                class_weights=class_weights.to(device)                
+            )
+        else:
+            cls_loss, reg_loss, total_loss = losses_val(
             class_preds,
             regr_preds,
             batch['clusters'],
@@ -610,10 +625,10 @@ def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, dev
             loss_normalizer=200.0,
             loss_normalizer_momentum=0.8,
             train_loss_weight=args.train_loss_weight,
-            #class_weights=class_weights.to(device),
             class_weights=None
-            
-        )
+            )
+
+
     clusters = batch['clusters']
     segments = batch['segments']
 
@@ -833,6 +848,8 @@ if __name__ == "__main__":
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     parser.add_argument("--allowed_qualities", nargs='+', type=int, default=[1,2,3])
+    parser.add_argument("--class_weights", type = bool, default = False)
+    parser.add_argument("--whisper_size", default = "base")
 
     args = parser.parse_args()
 
@@ -878,23 +895,26 @@ if __name__ == "__main__":
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
 
     audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 1 )
-
-    class_weights, counts = compute_class_weights_from_label_list(
-        label_list_train,
-        FIXED_CLUSTER_CODEBOOK
-    )
-
-    class_weights=None
+    if args.class_weights == True:
+        class_weights, counts = compute_class_weights_from_label_list(
+            label_list_train,
+            FIXED_CLUSTER_CODEBOOK
+        )
+    else:
+        class_weights=None
 
     #slices audios in chunks of total_spec_columns spectogram columns and adjusts the labels accordingly
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
     print(f"Created {len(audio_list_train)} training samples after slicing") 
 
-    #feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
-    #feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-    feature_extractor = WhisperFeatureExtractor.from_pretrained(
-    "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
-    local_files_only=True)
+    if args.whisper_size == "large":
+        feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large", local_files_only=True))
+    elif args.whisper_size == "base":
+        feature_extractor = WhisperFeatureExtractor.from_pretrained(
+        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
+        local_files_only=True)
+    else:
+        raise ValueError(f"Invalid whisper size: {args.whisper_size}")
 
 
     if args.val_ratio > 0:
