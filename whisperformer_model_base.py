@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 from transformers import WhisperModel
 
-#whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
-#whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
-#whisper_model = WhisperModel.from_pretrained("/mnt/lustre-grete/usr/u17327/whisperseg-base-animal-vad")
-whisper_model = WhisperModel.from_pretrained('/mnt/lustre-grete/usr/u17327/whisperseg-base-animal-vad')
+
+whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
+whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
 
 
 NUM_CLASSES = 1  # number of classes TODO: make this an input 
@@ -13,10 +12,13 @@ INPUT_DIM = whisper_model.config.d_model  # Whisper encoder hidden size (for sma
 KERNEL_SIZE = 3
 
 # 1. Load Whisper Encoder
+class WhisperEncoder(nn.Module):
+    def __init__(self, encoder):
+        super().__init__()
+        self.encoder = encoder
 
-encoder = whisper_model.encoder
-
-# To-Do: light weight decoder
+    def forward(self, x):
+        return self.encoder(x)
 
 # Lightweight decoder
 class LightDecoderLayer(nn.Module):
@@ -128,17 +130,14 @@ class WhisperFormer(nn.Module):
         dropout=0.1
     ):
         super().__init__()
-        self.encoder = encoder
+        self.encoder = WhisperEncoder(encoder)
         self.no_decoder = no_decoder
-
         self.decoder = LightDecoder(num_layers=num_decoder_layers, dropout=dropout)
-
         self.class_head = ClassificationHead(
             num_classes=num_classes,
             num_layers=num_head_layers,
             dropout=dropout
         )
-
         self.regr_head = RegressionHead(
             num_layers=num_head_layers,
             dropout=dropout
@@ -154,3 +153,5 @@ class WhisperFormer(nn.Module):
         regr_preds = self.regr_head(decoder_outputs)
 
         return class_preds, regr_preds
+
+
