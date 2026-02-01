@@ -564,6 +564,7 @@ def losses_val(
 def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
     """Load ActionFormer model with Whisper encoder"""
     
+    
     if whisper_size == "large":
         whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
     elif whisper_size == "base":
@@ -574,7 +575,7 @@ def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_d
     encoder = whisper_model.encoder
     
     # Create WhisperFormer model with the correct number of classes
-    model = WhisperFormer(whisper_size=args.whisper_size, encoder=encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
+    model = WhisperFormer(encoder=encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
     
     # Load pretrained weights if available ACHTUNG RICHTIGE GRÖSSE TESTEN!
     if initial_model_path and os.path.exists(initial_model_path):
@@ -867,8 +868,7 @@ if __name__ == "__main__":
         
     device = torch.device(  "cuda:%d"%( args.gpu_list[0] ) if torch.cuda.is_available() else "cpu" )
 
-
-    model = load_actionformer_model(args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
+    model = load_actionformer_model(args.whisper_size, args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
     
     if args.freeze_encoder:
         for para in model.encoder.parameters():
@@ -908,7 +908,7 @@ if __name__ == "__main__":
     print(f"Created {len(audio_list_train)} training samples after slicing") 
 
     if args.whisper_size == "large":
-        feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large", local_files_only=True))
+        feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large", local_files_only=True)
     elif args.whisper_size == "base":
         feature_extractor = WhisperFeatureExtractor.from_pretrained(
         "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
