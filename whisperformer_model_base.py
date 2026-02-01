@@ -2,13 +2,6 @@ import torch
 import torch.nn as nn
 from transformers import WhisperModel
 
-
-whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
-whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-
-
-NUM_CLASSES = 1  # number of classes TODO: make this an input 
-INPUT_DIM = whisper_model.config.d_model  # Whisper encoder hidden size (for small model) 
 KERNEL_SIZE = 3
 
 # 1. Load Whisper Encoder
@@ -20,23 +13,26 @@ class WhisperEncoder(nn.Module):
     def forward(self, x):
         return self.encoder(x)
 
-# Lightweight decoder
 class LightDecoderLayer(nn.Module):
-    def __init__(self, d_model=INPUT_DIM, n_heads=4, dim_ff=2*INPUT_DIM, dropout=0.1):
+    def __init__(self, d_model, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
 
-        # Self-Attention: jedes Zeitfenster 'schaut' auf die Nachbarn
-        self.self_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        if dim_ff is None:
+            dim_ff = 2 * d_model
 
-        # Layer Normalization (wie im Transformer)
+        assert d_model % n_heads == 0, \
+            f"d_model={d_model} must be divisible by n_heads={n_heads}"
+
+        self.self_attn = nn.MultiheadAttention(
+            d_model, n_heads, batch_first=True
+        )
+
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
 
-        # Dropouts für Regularisierung
         self.dropout_attn = nn.Dropout(dropout)
         self.dropout_ff = nn.Dropout(dropout)
 
-        # Feed-Forward Netzwerk (2 Layer MLP)
         self.ff = nn.Sequential(
             nn.Linear(d_model, dim_ff),
             nn.GELU(),
@@ -59,15 +55,16 @@ class LightDecoderLayer(nn.Module):
         return x
 
 
-
 class LightDecoder(nn.Module):
-    def __init__(self, num_layers=3, d_model= INPUT_DIM, n_heads=4, dim_ff=2*INPUT_DIM, dropout=0.1):
+    def __init__(self, d_model, num_layers=3, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
+
         self.layers = nn.ModuleList([
-            LightDecoderLayer(d_model, n_heads, dim_ff,dropout)
+            LightDecoderLayer(d_model, n_heads, dim_ff, dropout)
             for _ in range(num_layers)
         ])
-        self.norm = nn.LayerNorm(d_model)  
+
+        self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x):
         for layer in self.layers:
@@ -75,9 +72,11 @@ class LightDecoder(nn.Module):
         return self.norm(x)
 
 
+
+
 # 2. Classification Head (similar to ActionFormer) 
 class ClassificationHead(nn.Module):
-    def __init__(self, input_dim=INPUT_DIM, num_classes=NUM_CLASSES, num_layers=2, dropout=0.1):
+    def __init__(self, input_dim, num_classes, num_layers=2, dropout=0.1):
         super().__init__()
 
         layers = []
@@ -98,7 +97,7 @@ class ClassificationHead(nn.Module):
 
 # 3. Regression Head (similar to ActionFormer)
 class RegressionHead(nn.Module):
-    def __init__(self, input_dim=INPUT_DIM, num_layers=2, dropout=0.1):
+    def __init__(self, input_dim, num_layers=2, dropout=0.1):
         super().__init__()
 
         layers = []
@@ -118,27 +117,35 @@ class RegressionHead(nn.Module):
         return x.transpose(1, 2)    # (B, T, 2)
 
 
-# 4.entier model
 class WhisperFormer(nn.Module):
     def __init__(
         self,
         encoder,
-        num_classes=NUM_CLASSES,
-        no_decoder=False,
+        num_classes,
         num_decoder_layers=3,
         num_head_layers=2,
         dropout=0.1
     ):
         super().__init__()
+
         self.encoder = WhisperEncoder(encoder)
-        self.no_decoder = no_decoder
-        self.decoder = LightDecoder(num_layers=num_decoder_layers, dropout=dropout)
+        d_model = encoder.config.d_model   # 🔥 EINZIGE Quelle der Wahrheit
+
+        self.decoder = LightDecoder(
+            d_model=d_model,
+            num_layers=num_decoder_layers,
+            dropout=dropout
+        )
+
         self.class_head = ClassificationHead(
+            input_dim=d_model,
             num_classes=num_classes,
             num_layers=num_head_layers,
             dropout=dropout
         )
+
         self.regr_head = RegressionHead(
+            input_dim=d_model,
             num_layers=num_head_layers,
             dropout=dropout
         )
@@ -153,5 +160,4 @@ class WhisperFormer(nn.Module):
         regr_preds = self.regr_head(decoder_outputs)
 
         return class_preds, regr_preds
-
 
