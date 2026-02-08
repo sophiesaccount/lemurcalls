@@ -11,7 +11,7 @@ from copy import deepcopy
 
 from whisperformer_dataset_quality import WhisperFormerDatasetQuality
 from whisperformer_model_base import WhisperFormer
-from transformers import WhisperModel, WhisperFeatureExtractor
+from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
 from datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
@@ -94,122 +94,80 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
 
 # ==================== MODEL LOADING ====================
 
-def detect_whisper_size(checkpoint_path, whisper_size_arg=None):
+def detect_whisper_size_from_state_dict(state_dict):
     """
-    Automatisch die Whisper-Größe erkennen.
-    
-    Args:
-        checkpoint_path: Pfad zum Checkpoint
-        whisper_size_arg: Optional explizit angegebene Größe ("base" oder "large")
-    
-    Returns:
-        "base" oder "large"
+    Whisper-Größe anhand der Gewicht-Dimensionen im State Dict erkennen.
+    Whisper Base: d_model=512, Whisper Large: d_model=1280
     """
-    # Wenn explizit angegeben, verwenden
-    if whisper_size_arg:
-        if whisper_size_arg.lower() in ["base", "large"]:
-            return whisper_size_arg.lower()
-        else:
-            raise ValueError(f"Invalid whisper_size: {whisper_size_arg}. Must be 'base' or 'large'")
-    
-    # Versuche aus Checkpoint-Pfad zu erkennen
-    checkpoint_path_lower = checkpoint_path.lower()
-    if "large" in checkpoint_path_lower:
-        return "large"
-    elif "base" in checkpoint_path_lower:
-        return "base"
-    
-    # Versuche aus State Dict Dimensionen zu erkennen
-    # Whisper Base: d_model=512, Whisper Large: d_model=1280
-    try:
-        state_dict = torch.load(checkpoint_path, map_location="cpu")
-        
-        # Suche nach Encoder-Gewichten, um d_model zu bestimmen
-        # Prüfe verschiedene mögliche Key-Patterns
-        for key in state_dict.keys():
-            # Prüfe encoder.encoder.conv1.weight oder encoder.conv1.weight
-            if "conv1.weight" in key or "conv1.bias" in key:
-                weight = state_dict[key]
-                if len(weight.shape) >= 1:
-                    # conv1.weight hat Shape [d_model, 80, 3] oder conv1.bias hat Shape [d_model]
-                    d_model = weight.shape[0]
-                    if d_model == 1280:
-                        print(f"🔍 Detected Whisper size from checkpoint dimensions: large (d_model={d_model})")
-                        return "large"
-                    elif d_model == 512:
-                        print(f"🔍 Detected Whisper size from checkpoint dimensions: base (d_model={d_model})")
-                        return "base"
-            
-            # Prüfe auch layer_norm oder embed_positions
-            if "layer_norm.weight" in key or "embed_positions.weight" in key:
-                weight = state_dict[key]
-                if len(weight.shape) >= 1:
-                    # layer_norm.weight hat Shape [d_model]
-                    # embed_positions.weight hat Shape [max_positions, d_model]
-                    if len(weight.shape) == 1:
-                        d_model = weight.shape[0]
-                    else:
-                        d_model = weight.shape[-1]  # letzte Dimension
-                    
-                    if d_model == 1280:
-                        print(f"🔍 Detected Whisper size from checkpoint dimensions: large (d_model={d_model})")
-                        return "large"
-                    elif d_model == 512:
-                        print(f"🔍 Detected Whisper size from checkpoint dimensions: base (d_model={d_model})")
-                        return "base"
-    except Exception as e:
-        print(f"⚠️  Could not detect Whisper size from checkpoint: {e}")
-    
-    # Default: base
-    print("⚠️  Could not detect Whisper size, defaulting to 'base'")
-    return "base"
+    for key in state_dict.keys():
+        if "conv1.weight" in key:
+            d_model = state_dict[key].shape[0]
+            if d_model == 1280:
+                return "large"
+            elif d_model == 512:
+                return "base"
+    return None
 
 
 def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device, whisper_size=None):
     """
     Lade trainiertes WhisperFormer Modell.
     
-    Args:
-        checkpoint_path: Pfad zum Checkpoint
-        num_classes: Anzahl der Klassen
-        num_decoder_layers: Anzahl der Decoder-Layers
-        num_head_layers: Anzahl der Head-Layers
-        device: Device (cuda/cpu)
-        whisper_size: Optional explizit angegebene Whisper-Größe ("base" oder "large")
+    Der Checkpoint enthält ALLE Gewichte (inkl. frozen Encoder).
+    Es wird nur die WhisperConfig (kleines JSON) geladen, NICHT das volle
+    Pretrained-Modell -- die Encoder-Gewichte kommen direkt aus dem Checkpoint.
+    
+    Whisper-Größe wird automatisch aus dem Checkpoint erkannt
+    (d_model=512 -> base, d_model=1280 -> large).
     """
-    # Automatisch Whisper-Größe erkennen
-    detected_size = detect_whisper_size(checkpoint_path, whisper_size)
-    print(f"🔍 Detected Whisper size: {detected_size}")
-    
-    # Whisper-Modell laden basierend auf erkanntem Größe
-    if detected_size == "large":
-        whisper_model_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
-    else:  # base
-        whisper_model_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
-    
-    whisper_model = WhisperModel.from_pretrained(whisper_model_path)
-    
-    encoder = whisper_model.encoder
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
-    
-    # State Dict laden und Präfix-Problem beheben
+    # 1) State Dict einmal laden
     state_dict = torch.load(checkpoint_path, map_location=device)
     
-    # Prüfe, ob State Dict Keys mit "encoder." statt "encoder.encoder." hat
-    # (Das passiert, wenn das Modell ohne WhisperEncoder-Wrapper gespeichert wurde)
-    if any(k.startswith("encoder.") and not k.startswith("encoder.encoder.") for k in state_dict.keys()):
-        # Füge "encoder." Präfix hinzu, wo nötig
+    # 2) Whisper-Größe bestimmen
+    if whisper_size and whisper_size.lower() in ["base", "large"]:
+        detected_size = whisper_size.lower()
+    else:
+        detected_size = detect_whisper_size_from_state_dict(state_dict)
+        if detected_size is None:
+            # Fallback: aus Checkpoint-Pfad erkennen
+            path_lower = checkpoint_path.lower()
+            if "large" in path_lower:
+                detected_size = "large"
+            else:
+                detected_size = "base"
+    
+    print(f"Detected Whisper size: {detected_size}")
+    
+    # 3) Nur die Config laden (kleines JSON) -- kein from_pretrained noetig,
+    #    da alle Gewichte (inkl. Encoder) aus dem Checkpoint kommen
+    if detected_size == "large":
+        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
+    else:
+        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
+    
+    config = WhisperConfig.from_pretrained(config_path)
+    whisper_model = WhisperModel(config)  # leere Gewichte, kein Download
+    encoder = whisper_model.encoder
+    
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+    
+    # 4) Praefix-Korrektur: Checkpoint hat "encoder.X", Modell erwartet "encoder.encoder.X"
+    #    wegen WhisperEncoder-Wrapper (self.encoder = encoder in whisperformer_model_base.py)
+    needs_remap = any(
+        k.startswith("encoder.") and not k.startswith("encoder.encoder.") 
+        for k in state_dict.keys()
+    )
+    if needs_remap:
         new_state_dict = {}
         for k, v in state_dict.items():
             if k.startswith("encoder.") and not k.startswith("encoder.encoder."):
-                # Füge "encoder." Präfix hinzu: "encoder.conv1" -> "encoder.encoder.conv1"
-                new_key = "encoder." + k
-                new_state_dict[new_key] = v
+                new_state_dict["encoder." + k] = v
             else:
                 new_state_dict[k] = v
         state_dict = new_state_dict
     
-    model.load_state_dict(state_dict, strict=False)
+    # 5) ALLE Gewichte (Encoder + Decoder + Heads) aus dem Checkpoint laden
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model, detected_size
@@ -385,14 +343,9 @@ if __name__ == "__main__":
         whisper_size=args.whisper_size
     )
     
-    # Feature Extractor basierend auf erkanntem Whisper-Größe laden
-    if detected_whisper_size == "large":
-        feature_extractor_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
-    else:  # base
-        feature_extractor_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
-    
+    # Feature Extractor laden (identisch bei allen Whisper-Groessen: 80 Mel-Bins, 16kHz)
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        feature_extractor_path,
+        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
         local_files_only=True
     )
 
