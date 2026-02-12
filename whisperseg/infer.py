@@ -7,7 +7,7 @@ from pathlib import Path
 import librosa
 from scipy.io import wavfile
 
-from model import WhisperSegmenterFast
+from .model import WhisperSegmenterFast
 
 
 def fetch_sr_rounded(wav_path: str) -> int:

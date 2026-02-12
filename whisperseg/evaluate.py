@@ -9,10 +9,10 @@ from typing import Dict, List, Union
 import librosa
 import numpy as np
 
-from datautils_ben import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
-from model import WhisperSegmenterFast
-from train import evaluate
-from utils import create_if_not_exists
+from .datautils_ben import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
+from .model import WhisperSegmenterFast
+from .train import evaluate
+from ..utils import create_if_not_exists
 
 
 def convert_numpy_to_regular(data: Union[np.generic, List, Dict]):
