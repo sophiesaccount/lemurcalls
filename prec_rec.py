@@ -8,8 +8,8 @@ from datetime import datetime
 from collections import defaultdict
 import numpy as np
 
-from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model_base import WhisperFormer
+from whisperformer_dataset import WhisperFormerDatasetQuality
+from whisperformer_model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor
 from datautils import (
     get_audio_and_label_paths_from_folders,
@@ -18,7 +18,7 @@ from datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from wf_soft_base import collate_fn, nms_1d_torch, group_by_file, evaluate_detection_metrics_with_false_class_qualities
+from whisperformer_train import collate_fn, nms_1d_torch, group_by_file, evaluate_detection_metrics_with_false_class_qualities
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.metrics import precision_score, recall_score, f1_score
