@@ -23,7 +23,7 @@ from ..utils import *
 from torch.nn.utils.rnn import pad_sequence
 from .dataset import WhisperFormerDatasetQuality
 from .model import WhisperFormer
-from ..losses import sigmoid_focal_loss, ctr_diou_loss_1d
+from .losses import sigmoid_focal_loss, ctr_diou_loss_1d
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -559,16 +559,17 @@ def losses_val(
 
 
 
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_WHISPER_MODELS_DIR = os.path.join(_PROJECT_ROOT, "whisper_models")
+
+
 def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
     """Load ActionFormer model with Whisper encoder"""
     
-    
-    if whisper_size == "large":
-        whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
-    elif whisper_size == "base":
-        whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base")
-    else:
-        raise ValueError(f"Invalid whisper size: {whisper_size}")
+    whisper_path = os.path.join(_WHISPER_MODELS_DIR, f"whisper_{whisper_size}")
+    if not os.path.isdir(whisper_path):
+        raise ValueError(f"Whisper model not found at {whisper_path}")
+    whisper_model = WhisperModel.from_pretrained(whisper_path)
 
     encoder = whisper_model.encoder
     
@@ -905,14 +906,10 @@ if __name__ == "__main__":
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
     print(f"Created {len(audio_list_train)} training samples after slicing") 
 
-    if args.whisper_size == "large":
-        feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large", local_files_only=True)
-    elif args.whisper_size == "base":
-        feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
-        local_files_only=True)
-    else:
-        raise ValueError(f"Invalid whisper size: {args.whisper_size}")
+    whisper_path = os.path.join(_WHISPER_MODELS_DIR, f"whisper_{args.whisper_size}")
+    if not os.path.isdir(whisper_path):
+        raise ValueError(f"Whisper model not found at {whisper_path}")
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(whisper_path, local_files_only=True)
 
 
     if args.val_ratio > 0:
