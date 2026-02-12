@@ -140,10 +140,9 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
     
     # 3) Nur die Config laden (kleines JSON) -- kein from_pretrained noetig,
     #    da alle Gewichte (inkl. Encoder) aus dem Checkpoint kommen
-    if detected_size == "large":
-        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
-    else:
-        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
+    config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
     
     config = WhisperConfig.from_pretrained(config_path)
     whisper_model = WhisperModel(config)  # leere Gewichte, kein Download
@@ -344,8 +343,10 @@ if __name__ == "__main__":
     )
     
     # Feature Extractor laden (identisch bei allen Whisper-Groessen: 80 Mel-Bins, 16kHz)
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
+        os.path.join(_whisper_models_dir, "whisper_base"),
         local_files_only=True
     )
 
