@@ -188,4 +188,3 @@ experiments/
 *.png
 wandb/
 *.csv
-tests/
