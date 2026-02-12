@@ -9,8 +9,8 @@ from collections import defaultdict
 import numpy as np
 
 from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model_large import WhisperFormer
-from transformers import WhisperModel, WhisperFeatureExtractor
+from whisperformer_model_base import WhisperFormer
+from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
 from datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
@@ -243,16 +243,83 @@ def plot_spectrogram_and_scores(
 
 # ==================== MODEL LOADING ====================
 
-def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
-    #whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
-    whisper_model = WhisperModel.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large")
+def detect_whisper_size_from_state_dict(state_dict):
+    """
+    Whisper-Größe anhand der Gewicht-Dimensionen im State Dict erkennen.
+    Whisper Base: d_model=512, Whisper Large: d_model=1280
+    """
+    for key in state_dict.keys():
+        if "conv1.weight" in key:
+            d_model = state_dict[key].shape[0]
+            if d_model == 1280:
+                return "large"
+            elif d_model == 512:
+                return "base"
+    return None
 
+
+def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device, whisper_size=None):
+    """
+    Lade trainiertes WhisperFormer Modell.
+
+    Der Checkpoint enthält ALLE Gewichte (inkl. frozen Encoder).
+    Es wird nur die WhisperConfig (kleines JSON) geladen, NICHT das volle
+    Pretrained-Modell -- die Encoder-Gewichte kommen direkt aus dem Checkpoint.
+
+    Whisper-Größe wird automatisch aus dem Checkpoint erkannt
+    (d_model=512 -> base, d_model=1280 -> large).
+    """
+    # 1) State Dict einmal laden
+    state_dict = torch.load(checkpoint_path, map_location=device)
+
+    # 2) Whisper-Größe bestimmen
+    if whisper_size and whisper_size.lower() in ["base", "large"]:
+        detected_size = whisper_size.lower()
+    else:
+        detected_size = detect_whisper_size_from_state_dict(state_dict)
+        if detected_size is None:
+            # Fallback: aus Checkpoint-Pfad erkennen
+            path_lower = checkpoint_path.lower()
+            if "large" in path_lower:
+                detected_size = "large"
+            else:
+                detected_size = "base"
+
+    print(f"Detected Whisper size: {detected_size}")
+
+    # 3) Nur die Config laden (kleines JSON) -- kein from_pretrained noetig,
+    #    da alle Gewichte (inkl. Encoder) aus dem Checkpoint kommen
+    if detected_size == "large":
+        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
+    else:
+        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
+
+    config = WhisperConfig.from_pretrained(config_path)
+    whisper_model = WhisperModel(config)  # leere Gewichte, kein Download
     encoder = whisper_model.encoder
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+
+    # 4) Praefix-Korrektur: Checkpoint hat "encoder.X", Modell erwartet "encoder.encoder.X"
+    #    wegen WhisperEncoder-Wrapper (self.encoder = encoder in whisperformer_model_base.py)
+    needs_remap = any(
+        k.startswith("encoder.") and not k.startswith("encoder.encoder.")
+        for k in state_dict.keys()
+    )
+    if needs_remap:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("encoder.") and not k.startswith("encoder.encoder."):
+                new_state_dict["encoder." + k] = v
+            else:
+                new_state_dict[k] = v
+        state_dict = new_state_dict
+
+    # 5) ALLE Gewichte (Encoder + Decoder + Heads) aus dem Checkpoint laden
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
-    return model
+    return model, detected_size
 
 
 # ==================== INFERENCE ====================
@@ -384,6 +451,8 @@ if __name__ == "__main__":
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     parser.add_argument("--allowed_qualities", default = [1,2,3])
+    parser.add_argument("--whisper_size", type=str, default=None, choices=["base", "large"],
+                        help="Whisper-Größe (base/large). Wird automatisch erkannt wenn nicht angegeben.")
     args = parser.parse_args()
 
     # === Zeitgestempelten Unterordner erstellen ===
@@ -403,10 +472,17 @@ if __name__ == "__main__":
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.device)
-    #feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
+    model, detected_size = load_trained_whisperformer(
+        args.checkpoint_path, args.num_classes, args.num_decoder_layers,
+        args.num_head_layers, args.device, whisper_size=args.whisper_size
+    )
+    print(f"Modell geladen (Whisper {detected_size})")
 
-    feature_extractor = WhisperFeatureExtractor.from_pretrained("/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large",local_files_only=True)
+    # Feature Extractor ist unabhängig von der Modellgröße (gleiche Mel-Parameter)
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(
+        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
+        local_files_only=True
+    )
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
     all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": []}
