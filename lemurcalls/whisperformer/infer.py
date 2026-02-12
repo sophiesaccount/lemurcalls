@@ -9,8 +9,8 @@ from collections import defaultdict
 import numpy as np
 from copy import deepcopy
 
-from whisperformer_dataset import WhisperFormerDatasetQuality
-from whisperformer_model import WhisperFormer
+from .dataset import WhisperFormerDatasetQuality
+from .model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
 from datautils import (
     get_audio_and_label_paths_from_folders,
@@ -19,7 +19,7 @@ from datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from whisperformer_train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities, run_inference_new, soft_nms_1d_torch
+from .train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities, run_inference_new, soft_nms_1d_torch
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import contextlib
