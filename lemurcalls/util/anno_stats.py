@@ -1,7 +1,6 @@
 import argparse
 import logging
 from collections import defaultdict
-from pathlib import Path
 from string import digits
 from typing import List
 

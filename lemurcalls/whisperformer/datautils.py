@@ -2,14 +2,12 @@ import json
 import os
 import threading
 from copy import deepcopy
-import sys
 
 import librosa
 import numpy as np
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from ..audio_utils import WhisperSegFeatureExtractor
 from transformers import WhisperFeatureExtractor
 from ..util.common import is_scheduled_job
 from ..utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP

@@ -3,7 +3,6 @@ import json
 import os
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
@@ -22,11 +21,9 @@ from ...datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from ..train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities
+from ..train import collate_fn
 from ..infer import soft_nms_1d_torch
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.metrics import precision_score, recall_score, f1_score
 
 import matplotlib.pyplot as plt
 import librosa.display
@@ -35,7 +32,6 @@ import matplotlib.pyplot as plt
 import librosa.display
 import numpy as np
 import os
-import matplotlib.patches as mpatches
 
 from scipy.signal import butter, filtfilt
 
@@ -76,7 +72,6 @@ def compute_snr(y, sr, cutoff=200, order=5):
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
 
-    import numpy as np
 
 def compute_snr_timebased(y, sr, start_sample, end_sample):
     """

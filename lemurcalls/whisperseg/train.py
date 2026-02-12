@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -23,7 +22,6 @@ from .model import WhisperSegmenterForEval, load_model, save_model
 from ..util.common import EarlyStopHandler, is_scheduled_job
 from ..util.confusion_framewise import confusion_matrix_framewise
 from ..utils import *
-from torch.nn.utils.rnn import pad_sequence
 
 
 def collate_fn(batch):

@@ -3,7 +3,6 @@ import json
 import os
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
@@ -19,10 +18,7 @@ from ..datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from .train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities, run_inference_new, soft_nms_1d_torch
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import contextlib
+from .train import collate_fn, run_inference_new
 
 
 def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_columns=2000, offset=0):

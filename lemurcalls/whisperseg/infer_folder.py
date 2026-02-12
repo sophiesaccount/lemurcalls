@@ -8,7 +8,6 @@ from datetime import datetime
 from collections import defaultdict
 import numpy as np
 
-from ..whisperformer.dataset import WhisperFormerDataset
 from ..whisperformer.dataset import WhisperFormerDatasetQuality
 from ..whisperformer.model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor
@@ -22,7 +21,6 @@ from ..datautils import (
 from ..whisperformer.train import collate_fn
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.metrics import precision_score, recall_score, f1_score
 
 
 # ==================== MODEL LOADING ====================
