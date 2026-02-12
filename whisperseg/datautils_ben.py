@@ -8,9 +8,9 @@ import numpy as np
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from audio_utils import WhisperSegFeatureExtractor
-from util.common import is_scheduled_job
-from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
+from ..audio_utils import WhisperSegFeatureExtractor
+from ..util.common import is_scheduled_job
+from ..utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
 
 def get_audio_and_label_paths( folder ):
