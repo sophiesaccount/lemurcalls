@@ -173,6 +173,7 @@ model_folder_ben/
 model_folder_final/
 model_folder_new/
 whisper_models/
+scripts/
 whisper_size/
 segments.pt
 
