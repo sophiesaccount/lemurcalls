@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from datetime import datetime
 from scipy.signal import butter, filtfilt
-from scatterplot_ampl_snr_score import compute_snr_new
-from datautils import (
+from ..visualization.scatterplot_ampl_snr_score import compute_snr_new
+from ...datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
     slice_audios_and_labels,

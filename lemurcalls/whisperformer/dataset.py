@@ -4,8 +4,8 @@ from torch.utils.data import Dataset
 import librosa
 import json
 import torchaudio
-from util.common import is_scheduled_job
-from utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
+from ..util.common import is_scheduled_job
+from ..utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
 
 class WhisperFormerDatasetQuality(Dataset):

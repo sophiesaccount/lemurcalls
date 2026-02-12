@@ -12,7 +12,7 @@ from copy import deepcopy
 from .dataset import WhisperFormerDatasetQuality
 from .model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
-from datautils import (
+from ..datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
     slice_audios_and_labels,
