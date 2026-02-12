@@ -11,7 +11,7 @@ import numpy as np
 from .whisperformer.dataset import WhisperFormerDatasetQuality
 from .whisperformer.model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
-from datautils import (
+from .datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
     slice_audios_and_labels,
@@ -22,7 +22,7 @@ from .whisperformer.train import collate_fn, nms_1d_torch, evaluate_detection_me
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.metrics import precision_score, recall_score, f1_score
-from scatterplot_ampl_snr_score import compute_snr, compute_snr_new, compute_snr_timebased
+from .whisperformer.visualization.scatterplot_ampl_snr_score import compute_snr, compute_snr_new, compute_snr_timebased
 
 import matplotlib.pyplot as plt
 import librosa.display
@@ -289,10 +289,9 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
 
     # 3) Nur die Config laden (kleines JSON) -- kein from_pretrained noetig,
     #    da alle Gewichte (inkl. Encoder) aus dem Checkpoint kommen
-    if detected_size == "large":
-        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_large"
-    else:
-        config_path = "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base"
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
+    config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
 
     config = WhisperConfig.from_pretrained(config_path)
     whisper_model = WhisperModel(config)  # leere Gewichte, kein Download
@@ -479,8 +478,10 @@ if __name__ == "__main__":
     print(f"Modell geladen (Whisper {detected_size})")
 
     # Feature Extractor ist unabhängig von der Modellgröße (gleiche Mel-Parameter)
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        "/projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/whisper_models/whisper_base",
+        os.path.join(_whisper_models_dir, "whisper_base"),
         local_files_only=True
     )
 
