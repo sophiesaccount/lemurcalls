@@ -23,8 +23,8 @@ from util.common import EarlyStopHandler, is_scheduled_job
 from util.confusion_framewise import confusion_matrix_framewise
 from utils import *
 from torch.nn.utils.rnn import pad_sequence
-from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model_base import WhisperFormer
+from whisperformer_dataset import WhisperFormerDatasetQuality
+from whisperformer_model import WhisperFormer
 from losses import sigmoid_focal_loss, ctr_diou_loss_1d
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import functional as F

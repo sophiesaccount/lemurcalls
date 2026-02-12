@@ -8,8 +8,8 @@ from datetime import datetime
 from collections import defaultdict
 import numpy as np
 
-from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model_base import WhisperFormer
+from whisperformer_dataset import WhisperFormerDatasetQuality
+from whisperformer_model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor, WhisperConfig
 from datautils import (
     get_audio_and_label_paths_from_folders,
