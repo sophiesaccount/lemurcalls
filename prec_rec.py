@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 
 from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model import WhisperFormer
+from whisperformer_model_base import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor
 from datautils import (
     get_audio_and_label_paths_from_folders,
@@ -18,7 +18,7 @@ from datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from wf_soft_large import collate_fn, nms_1d_torch, group_by_file, evaluate_detection_metrics_with_false_class_qualities
+from wf_soft_base import collate_fn, nms_1d_torch, group_by_file, evaluate_detection_metrics_with_false_class_qualities
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -27,9 +27,150 @@ import contextlib
 cluster_codebook=FIXED_CLUSTER_CODEBOOK
 feature_extractor = WhisperFeatureExtractor
 
+def evaluate_detection_metrics_with_false_class_qualities_q3_q2(labels, predictions, overlap_tolerance, allowed_qualities = [1,2,3]):
+
+    label_onsets   = labels['onset']
+    label_offsets  = labels['offset']
+    label_clusters = labels['cluster']
+    label_qualities = labels['quality']
+
+    # only use labels from the allowed quality classes
+    if allowed_qualities is not None:
+        # try to convert everything to int (if possible)
+        try:
+            allowed_ints = set(int(q) for q in allowed_qualities)
+            label_ints = np.array([int(float(q)) for q in label_qualities])
+            mask = np.array([q in allowed_ints for q in label_ints], dtype=bool)
+        except ValueError:
+            # else use string comparison 
+            allowed_str = set(str(q) for q in allowed_qualities)
+            qual_str = np.array([str(q) for q in label_qualities])
+            mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
+
+        label_onsets   = np.array(label_onsets)[mask]
+        label_offsets  = np.array(label_offsets)[mask]
+        label_clusters = np.array(label_clusters)[mask]
+        label_qualities = np.array(label_qualities)[mask]
+
+
+    # load predictions
+    pred_onsets = np.array(predictions['onset'])
+    pred_offsets = np.array(predictions['offset'])
+    pred_clusters = np.array(predictions['cluster'])
+    pred_scores = np.array(predictions['score'])
+
+    if any(str(x).lower() == "unknown" for x in pred_scores):
+        print('Score unknown')
+    else:
+        # sort predictions by score descending
+        order = np.argsort(-pred_scores)
+        pred_onsets = pred_onsets[order]
+        pred_offsets = pred_offsets[order]
+        pred_clusters = pred_clusters[order]
+        pred_scores = pred_scores[order]
+
+    matched_labels = set()
+    matched_preds = set()
+    q2_q3_matched_labels = set()
+    q2_q3_matched_preds = set()
+    fn_q3_q2 = set()
+    false_class = 0
+
+    gtp = len(label_onsets)     
+    pp  = len(pred_onsets)
+
+    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
+        for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+            if l_idx in matched_labels or p_idx in matched_preds or int(float(lq)) != 1:
+                continue
+            inter = max(0.0, min(pf, lf) - max(po, lo))
+            union = max(pf, lf) - min(po, lo)
+            ov = inter / union if union > 0 else 0.0
+            if ov > overlap_tolerance and str(pc) == str(lc):
+                matched_labels.add(l_idx)
+                matched_preds.add(p_idx)
+    #dann nach false class
+    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
+        for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+            if l_idx in matched_labels or p_idx in matched_preds or int(float(lq)) != 1:
+                continue
+            inter = max(0.0, min(pf, lf) - max(po, lo))
+            union = max(pf, lf) - min(po, lo)
+            ov = inter / union if union > 0 else 0.0
+            if ov > overlap_tolerance and str(pc) != str(lc):
+                false_class +=1
+                matched_labels.add(l_idx)
+                matched_preds.add(p_idx)
+
+
+
+    #check for false positives that can be matched with q2 or q3
+    for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
+        for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+            if l_idx in matched_labels  or l_idx in q2_q3_matched_labels or p_idx in matched_preds or int(float(lq)) == 1:
+                continue
+            inter = max(0.0, min(pf, lf) - max(po, lo))
+            union = max(pf, lf) - min(po, lo)
+            ov = inter / union if union > 0 else 0.0
+            if ov > overlap_tolerance:
+                if str(pc) != str(lc):
+                    continue
+                q2_q3_matched_labels.add(l_idx)
+                q2_q3_matched_preds.add(p_idx)
+
+            
+    
+    #check for false negatives with quality class 3 or 2
+    for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
+        if l_idx in matched_labels:
+            continue
+        if lq != '1':
+            fn_q3_q2.add(l_idx)
+    
+    print(len(q2_q3_matched_preds))
+    tp = len(matched_labels) - false_class
+    fp = len(pred_onsets) - len(matched_preds) -len(q2_q3_matched_preds)
+    fn = len(label_onsets) - len(matched_labels) - len(fn_q3_q2) #do not punish false negatives from qc 3 and 2
+    fc = false_class
+
+    precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0.0
+    recall    = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0.0
+    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        'gtp': gtp, 'pp': pp,
+        'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
+        'precision': precision, 'recall': recall, 'f1': f1
+    }
+
+
+
+
+def group_by_file(all_preds, all_labels, metadata_list):
+    """Gibt dicts zurück: {file_idx: {'onset':[], 'offset':[], 'cluster':[], 'score':[]}}"""
+    # Vorhersagen gruppieren
+    preds_grouped = defaultdict(lambda: {"onset": [], "offset": [], "cluster": [], "score": []})
+    for i, o in enumerate(all_preds["onset"]):
+        file_idx = all_preds["orig_idx"][i]  
+
+        preds_grouped[file_idx]["onset"].append(all_preds["onset"][i])
+        preds_grouped[file_idx]["offset"].append(all_preds["offset"][i])
+        preds_grouped[file_idx]["cluster"].append(all_preds["cluster"][i])
+        preds_grouped[file_idx]["score"].append(all_preds["score"][i])
+
+    # Labels gruppieren (falls all_labels noch nicht pro file_idx)
+    labels_grouped = defaultdict(lambda: {"onset": [], "offset": [], "cluster": [], "quality": []})
+    for i, o in enumerate(all_labels["onset"]):
+        file_idx = all_labels["orig_idx"][i]
+        labels_grouped[file_idx]["onset"].append(all_labels["onset"][i])
+        labels_grouped[file_idx]["offset"].append(all_labels["offset"][i])
+        labels_grouped[file_idx]["cluster"].append(all_labels["cluster"][i])
+        labels_grouped[file_idx]["quality"].append(all_labels["quality"][i])
+    
+    return preds_grouped, labels_grouped
+
 
 # ==================== MAIN ====================
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     #parser.add_argument("--checkpoint_path", required=True)
@@ -51,6 +192,10 @@ if __name__ == "__main__":
     parser.add_argument("--centerframe_size", type = float, default = 0.6)
     parser.add_argument("--allowed_qualities", nargs='+', type=int, default=[1,2,3])    
     parser.add_argument("--num_workers", type = int, default = 1 )
+    parser.add_argument("--eval_mode", type=str, default="standard", choices=["standard", "q3_q2"],
+                        help="Evaluation mode: 'standard' or 'q3_q2' (quality-aware with q3/q2 distinction)")
+    parser.add_argument("--thresholds", nargs='+', type=float, default=None,
+                        help="Custom thresholds to evaluate (e.g. --thresholds 0.1 0.2 0.3). Default: [0.1, 0.15, 0.2, 0.25, 0.3, 0.35]")
     args = parser.parse_args()
 
     # === Zeitgestempelten Unterordner erstellen ===
@@ -124,8 +269,15 @@ if __name__ == "__main__":
 
 
     precisions, recalls, f1s, f2s = [], [], [], []
-    #thresholds = np.arange(0, 1.02, 0.02)
-    thresholds = [0.4]
+    thresholds = args.thresholds if args.thresholds else [0.1, 0.15, 0.2, 0.25, 0.3, 0.35]
+
+    # Eval-Funktion basierend auf --eval_mode waehlen
+    if args.eval_mode == "q3_q2":
+        eval_fn = evaluate_detection_metrics_with_false_class_qualities_q3_q2
+        print("Using q3_q2 evaluation mode")
+    else:
+        eval_fn = evaluate_detection_metrics_with_false_class_qualities
+        print("Using standard evaluation mode")
     for threshold in thresholds:
             all_preds  = {"onset": [], "offset": [], "cluster": [], "score": [], 'orig_idx': []}
 
@@ -210,7 +362,7 @@ if __name__ == "__main__":
             for file_idx in range(38):
                 print(file_idx)
 
-                metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels_grouped[file_idx], all_preds_grouped[file_idx], overlap_tolerance = args.overlap_tolerance, allowed_qualities = args.allowed_qualities)
+                metrics = eval_fn(all_labels_grouped[file_idx], all_preds_grouped[file_idx], overlap_tolerance = args.overlap_tolerance, allowed_qualities = args.allowed_qualities)
                 tps.append(metrics['tp'])
                 fps.append(metrics['fp'])
                 fns.append(metrics['fn'])
