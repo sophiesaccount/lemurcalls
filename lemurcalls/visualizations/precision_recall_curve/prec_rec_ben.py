@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 
 from whisperformer_dataset_quality import WhisperFormerDatasetQuality
-from whisperformer_model import WhisperFormer
+from ...whisperformer.model import WhisperFormer
 from transformers import WhisperModel, WhisperFeatureExtractor
 from datautils_1 import (
     get_audio_and_label_paths_from_folders,
