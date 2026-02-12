@@ -3,7 +3,6 @@ import json
 import os
 import sys
 from datetime import datetime
-from glob import glob
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
@@ -13,19 +12,16 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
-from ..datautils import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
-                       get_cluster_codebook, load_data,
-                       slice_audios_and_labels, train_val_split, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER)
+from ..datautils import (get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
+                       load_data,
+                       slice_audios_and_labels, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER)
 
-from ..util.common import EarlyStopHandler, is_scheduled_job
-from ..util.confusion_framewise import confusion_matrix_framewise
+from ..util.common import is_scheduled_job
 from ..utils import *
-from torch.nn.utils.rnn import pad_sequence
 from .dataset import WhisperFormerDatasetQuality
 from .model import WhisperFormer
 from .losses import sigmoid_focal_loss, ctr_diou_loss_1d
-from torch.cuda.amp import autocast, GradScaler
-from torch.nn import functional as F
+from torch.cuda.amp import autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from transformers import WhisperFeatureExtractor
 from sklearn.model_selection import train_test_split

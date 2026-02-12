@@ -3,7 +3,6 @@ import json
 import os
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
@@ -21,7 +20,6 @@ from ...datautils import (
 from ..train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities, group_by_file
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.metrics import precision_score, recall_score, f1_score
 import contextlib
 
 def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = [1,2]):

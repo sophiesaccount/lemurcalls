@@ -1,15 +1,9 @@
-import os
-from glob import glob
 import pandas as pd
 from transformers import WhisperFeatureExtractor
 from transformers.audio_utils import mel_filter_bank
-import librosa
-from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 from ipywidgets import interact, fixed
-import json
-import re
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 import matplotlib.cm as cm

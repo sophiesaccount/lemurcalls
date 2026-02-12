@@ -3,7 +3,6 @@ import json
 import os
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
@@ -18,16 +17,11 @@ from .datautils import (
     FIXED_CLUSTER_CODEBOOK,
     ID_TO_CLUSTER
 )
-from .whisperformer.train import collate_fn, nms_1d_torch, evaluate_detection_metrics_with_false_class_qualities
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn.metrics import precision_score, recall_score, f1_score
-from .whisperformer.visualization.scatterplot_ampl_snr_score import compute_snr, compute_snr_new, compute_snr_timebased
+from .whisperformer.train import collate_fn, nms_1d_torch
+from .whisperformer.visualization.scatterplot_ampl_snr_score import compute_snr_new, compute_snr_timebased
 
-import matplotlib.pyplot as plt
 import librosa.display
 
-import matplotlib.pyplot as plt
 import librosa.display
 import numpy as np
 import os
