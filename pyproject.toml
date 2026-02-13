@@ -30,5 +30,14 @@ dependencies = [
     "wandb>=0.16",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
 [tool.setuptools.packages.find]
 include = ["lemurcalls*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
