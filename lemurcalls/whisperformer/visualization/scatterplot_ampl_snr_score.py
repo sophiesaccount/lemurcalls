@@ -22,7 +22,7 @@ from ...datautils import (
     ID_TO_CLUSTER
 )
 from ..train import collate_fn
-from ..infer import soft_nms_1d_torch
+from ..train import soft_nms_1d_torch
 import matplotlib.pyplot as plt
 
 import matplotlib.pyplot as plt
