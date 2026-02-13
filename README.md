@@ -82,6 +82,31 @@ Each label JSON should have the following structure:
 }
 ```
 
+## Development
+
+### Install with dev dependencies
+
+```bash
+pip install -e ".[dev]"
+```
+
+This installs everything from `pip install -e .` **plus** testing and linting tools (`pytest`, `ruff`).
+
+### Run tests
+
+```bash
+pytest tests/ -v
+```
+
+### Run linting
+
+```bash
+ruff check .          # find issues
+ruff format --check . # check formatting
+```
+
+CI runs these checks automatically on every push to `main` and on pull requests via GitHub Actions (see `.github/workflows/ci.yml`).
+
 ## WhisperSeg
 
 Sequence-to-sequence approach from Gu et al. (https://github.com/nianlonggu/WhisperSeg) based on [Whisper](https://github.com/openai/whisper). The Whisper decoder generates text tokens encoding timestamps and cluster labels for each vocalization segment.
