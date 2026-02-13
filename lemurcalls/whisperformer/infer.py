@@ -84,31 +84,14 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
     return new_audios, new_labels, new_metadata
 
 
-def detect_whisper_size_from_state_dict(state_dict):
-    """Detect Whisper size from state dict weight dimensions (base: d_model=512, large: d_model=1280).
-
-    Returns:
-        "base", "large", or None if not recognized.
-    """
-    for key in state_dict.keys():
-        if "conv1.weight" in key:
-            d_model = state_dict[key].shape[0]
-            if d_model == 1280:
-                return "large"
-            elif d_model == 512:
-                return "base"
-    return None
-
-
 def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
     """Load a trained WhisperFormer model from checkpoint.
 
     Architecture parameters (num_decoder_layers, num_head_layers, num_classes)
-    are inferred automatically from the checkpoint keys.
+    and Whisper size are inferred automatically from the checkpoint keys.
 
     The checkpoint contains all weights (including frozen encoder). Only WhisperConfig
-    is loaded from disk; encoder weights come from the checkpoint. Whisper size is
-    detected from the checkpoint (d_model 512 -> base, 1280 -> large) unless given.
+    is loaded from disk; encoder weights come from the checkpoint.
 
     Args:
         checkpoint_path: Path to the ``.pt`` / ``.pth`` checkpoint file.
@@ -119,7 +102,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
     Returns:
         Tuple (model, detected_size string).
     """
-    from .model import infer_architecture_from_state_dict
+    from .model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
 
     state_dict = torch.load(checkpoint_path, map_location=device)
 
@@ -127,20 +110,18 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
     num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
     if ckpt_num_classes is not None:
         num_classes = ckpt_num_classes
-    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
 
+    # Detect Whisper size
     if whisper_size and whisper_size.lower() in ["base", "large"]:
         detected_size = whisper_size.lower()
     else:
         detected_size = detect_whisper_size_from_state_dict(state_dict)
         if detected_size is None:
             path_lower = checkpoint_path.lower()
-            if "large" in path_lower:
-                detected_size = "large"
-            else:
-                detected_size = "base"
-    
-    print(f"Detected Whisper size: {detected_size}")
+            detected_size = "large" if "large" in path_lower else "base"
+
+    print(f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
+          f"num_head_layers={num_head_layers}, num_classes={num_classes}")
 
     _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     _whisper_models_dir = os.path.join(_project_root, "whisper_models")

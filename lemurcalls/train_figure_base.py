@@ -255,28 +255,6 @@ def plot_spectrogram_and_scores(
 
 # ==================== MODEL LOADING ====================
 
-def detect_whisper_size_from_state_dict(state_dict):
-    """Detect the Whisper model size from a checkpoint state dict.
-
-    Inspects the ``conv1.weight`` tensor dimension to distinguish between
-    Whisper Base (d_model=512) and Whisper Large (d_model=1280).
-
-    Args:
-        state_dict: Model state dict loaded from a checkpoint.
-
-    Returns:
-        ``"base"``, ``"large"``, or ``None`` if the size could not be determined.
-    """
-    for key in state_dict.keys():
-        if "conv1.weight" in key:
-            d_model = state_dict[key].shape[0]
-            if d_model == 1280:
-                return "large"
-            elif d_model == 512:
-                return "base"
-    return None
-
-
 def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
     """Load a trained WhisperFormer model from a checkpoint.
 
@@ -301,7 +279,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
         ``WhisperFormer`` in eval mode and *detected_size* is ``"base"`` or
         ``"large"``.
     """
-    from .whisperformer.model import infer_architecture_from_state_dict
+    from .whisperformer.model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
 
     # 1) Load state dict
     state_dict = torch.load(checkpoint_path, map_location=device)
