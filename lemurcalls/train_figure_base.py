@@ -277,8 +277,11 @@ def detect_whisper_size_from_state_dict(state_dict):
     return None
 
 
-def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device, whisper_size=None):
+def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
     """Load a trained WhisperFormer model from a checkpoint.
+
+    Architecture parameters (num_decoder_layers, num_head_layers, num_classes)
+    are inferred automatically from the checkpoint keys.
 
     The checkpoint contains all weights (including the frozen Whisper
     encoder), so only the lightweight ``WhisperConfig`` JSON is loaded from
@@ -288,9 +291,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
 
     Args:
         checkpoint_path: Path to the ``.pt`` checkpoint file.
-        num_classes: Number of output classes.
-        num_decoder_layers: Number of lightweight decoder layers.
-        num_head_layers: Number of layers in the classification/regression heads.
+        num_classes: Number of output classes (overridden if detectable from checkpoint).
         device: Torch device string or object (e.g. ``"cuda"`` or ``"cpu"``).
         whisper_size: Optional explicit Whisper size (``"base"`` or ``"large"``).
             Auto-detected from the checkpoint if ``None``.
@@ -300,10 +301,18 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
         ``WhisperFormer`` in eval mode and *detected_size* is ``"base"`` or
         ``"large"``.
     """
+    from .whisperformer.model import infer_architecture_from_state_dict
+
     # 1) Load state dict
     state_dict = torch.load(checkpoint_path, map_location=device)
 
-    # 2) Determine Whisper size
+    # 2) Infer architecture from checkpoint
+    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    if ckpt_num_classes is not None:
+        num_classes = ckpt_num_classes
+    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
+
+    # 3) Determine Whisper size
     if whisper_size and whisper_size.lower() in ["base", "large"]:
         detected_size = whisper_size.lower()
     else:
@@ -318,7 +327,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
 
     print(f"Detected Whisper size: {detected_size}")
 
-    # 3) Load config only (small JSON) -- no from_pretrained needed,
+    # 4) Load config only (small JSON) -- no from_pretrained needed,
     #    since all weights (incl. encoder) come from the checkpoint
     _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     _whisper_models_dir = os.path.join(_project_root, "whisper_models")
@@ -503,8 +512,6 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--num_decoder_layers", type = int, default = 3)
-    parser.add_argument("--num_head_layers", type = int, default = 2)
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
@@ -531,8 +538,8 @@ if __name__ == "__main__":
     id_to_cluster = ID_TO_CLUSTER
 
     model, detected_size = load_trained_whisperformer(
-        args.checkpoint_path, args.num_classes, args.num_decoder_layers,
-        args.num_head_layers, args.device, whisper_size=args.whisper_size
+        args.checkpoint_path, args.num_classes,
+        args.device, whisper_size=args.whisper_size
     )
     print(f"Model loaded (Whisper {detected_size})")
 

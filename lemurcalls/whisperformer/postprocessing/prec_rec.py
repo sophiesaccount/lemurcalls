@@ -178,8 +178,6 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.3)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--num_decoder_layers", type = int, default = 3)
-    parser.add_argument("--num_head_layers", type = int, default = 2)
     parser.add_argument("--low_quality_value", type = float, default = 0.5)
     parser.add_argument("--value_q2", type = float, default = 1)
     parser.add_argument("--centerframe_size", type = float, default = 0.6)

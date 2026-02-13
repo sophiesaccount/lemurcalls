@@ -100,17 +100,34 @@ def detect_whisper_size_from_state_dict(state_dict):
     return None
 
 
-def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device, whisper_size=None):
+def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
     """Load a trained WhisperFormer model from checkpoint.
+
+    Architecture parameters (num_decoder_layers, num_head_layers, num_classes)
+    are inferred automatically from the checkpoint keys.
 
     The checkpoint contains all weights (including frozen encoder). Only WhisperConfig
     is loaded from disk; encoder weights come from the checkpoint. Whisper size is
     detected from the checkpoint (d_model 512 -> base, 1280 -> large) unless given.
 
+    Args:
+        checkpoint_path: Path to the ``.pt`` / ``.pth`` checkpoint file.
+        num_classes: Number of output classes (overridden if detectable from checkpoint).
+        device: Torch device string or object.
+        whisper_size: Optional explicit Whisper size (``"base"`` or ``"large"``).
+
     Returns:
         Tuple (model, detected_size string).
     """
+    from .model import infer_architecture_from_state_dict
+
     state_dict = torch.load(checkpoint_path, map_location=device)
+
+    # Infer architecture from checkpoint
+    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    if ckpt_num_classes is not None:
+        num_classes = ckpt_num_classes
+    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
 
     if whisper_size and whisper_size.lower() in ["base", "large"]:
         detected_size = whisper_size.lower()
@@ -130,7 +147,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
     config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
     
     config = WhisperConfig.from_pretrained(config_path)
-    whisper_model = WhisperModel(config)  # leere Gewichte, kein Download
+    whisper_model = WhisperModel(config)
     encoder = whisper_model.encoder
     
     model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
@@ -292,8 +309,6 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--num_decoder_layers", type=int, default=3)
-    parser.add_argument("--num_head_layers", type=int, default=2)
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--allowed_qualities", default=[1,2])
@@ -320,8 +335,6 @@ if __name__ == "__main__":
     model, detected_whisper_size = load_trained_whisperformer(
         args.checkpoint_path, 
         args.num_classes, 
-        args.num_decoder_layers, 
-        args.num_head_layers, 
         args.device,
         whisper_size=args.whisper_size
     )
