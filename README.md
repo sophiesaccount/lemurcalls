@@ -55,18 +55,11 @@ pip install -e .
 This installs `lemurcalls` in editable mode with all dependencies from `pyproject.toml`.
 
 ### 3. Download Whisper model weights
-
+!!! Not necessary if you only need inference !!!
 The pretrained Whisper encoder weights are not included in the repository (because they are too large). Download them into the `whisper_models/` directory:
 
 ```bash
-python -c "
-from transformers import WhisperModel, WhisperFeatureExtractor
-for size in ['base', 'large']:
-    name = f'openai/whisper-{size}'
-    WhisperModel.from_pretrained(name).save_pretrained(f'whisper_models/whisper_{size}')
-    WhisperFeatureExtractor.from_pretrained(name).save_pretrained(f'whisper_models/whisper_{size}')
-    print(f'Saved whisper_{size}')
-"
+python download_whipser.py
 ```
 
 ### 4. Prepare your data
@@ -150,6 +143,16 @@ python -m lemurcalls.whisperformer.infer \
     --output_dir <output_dir> \
     --num_classes <n> \
     --whisper_size base
+```
+
+### Filter results by SNR and maximale amplitude (recommended)
+```bash
+python -m lemurcalls.whisperformer.postprocessing.filter_labels_by_snr.py \
+    --audio_folder <audio_dir> \
+    --label_folder <label_dir> \
+    --output_dir <output_dir> \
+    --snr_threshold <-1> \
+    --amplitude_threshold <0.035>
 ```
 
 ## Utilities
