@@ -30,15 +30,60 @@ lemurcalls/
 └── README.md
 ```
 
-## Installation
+## Getting Started
+
+### 1. Clone and create environment
 
 ```bash
-# Clone the repository
 git clone <repo-url>
 cd lemurcalls
 
-# Install in editable mode
+# Create a Python environment (conda/micromamba or venv)
+conda create -n lemurcalls python=3.10
+conda activate lemurcalls
+```
+
+### 2. Install the package
+
+```bash
 pip install -e .
+```
+
+This installs `lemurcalls` in editable mode with all dependencies from `pyproject.toml`.
+
+### 3. Download Whisper model weights
+
+The pretrained Whisper encoder weights are not included in the repository (because they are too large). Download them into the `whisper_models/` directory:
+
+```bash
+python -c "
+from transformers import WhisperModel, WhisperFeatureExtractor
+for size in ['base', 'large']:
+    name = f'openai/whisper-{size}'
+    WhisperModel.from_pretrained(name).save_pretrained(f'whisper_models/whisper_{size}')
+    WhisperFeatureExtractor.from_pretrained(name).save_pretrained(f'whisper_models/whisper_{size}')
+    print(f'Saved whisper_{size}')
+"
+```
+
+### 4. Prepare your data
+
+Place your audio and label files in separate directories:
+
+```
+data/
+├── audios/       # .wav files (16 kHz recommended)
+└── labels/       # .json files (one per audio, with onset/offset/cluster arrays)
+```
+
+Each label JSON should have the following structure:
+
+```json
+{
+  "onset": [0.5, 1.2, ...],
+  "offset": [0.8, 1.5, ...],
+  "cluster": ["m", "h", ...]
+}
 ```
 
 ## WhisperSeg
