@@ -17,8 +17,15 @@ from copy import deepcopy
 from collections import Counter
 
 
-def get_audio_and_label_paths( folder ):
-    #wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith(".wav") ]
+def get_audio_and_label_paths(folder):
+    """Collect paired audio (.wav) and label (.json) paths from a single folder.
+
+    Args:
+        folder: Directory containing .wav files; matching .json must have same stem.
+
+    Returns:
+        Tuple of (audio_paths, label_paths) for files where both exist.
+    """
     wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith((".WAV", ".wav")) ]
     audio_paths = []
     label_paths = []
@@ -31,12 +38,19 @@ def get_audio_and_label_paths( folder ):
     return audio_paths, label_paths
 
 def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
+    """Collect paired audio and label paths from separate folders by matching basename (no extension).
+
+    Args:
+        audio_folder: Directory with .wav files.
+        label_folder: Directory with .json files.
+
+    Returns:
+        Tuple of (audio_paths, label_paths) for common stems.
+    """
     audio_files = {os.path.splitext(f)[0]: os.path.join(audio_folder, f)
-                   #for f in os.listdir(audio_folder) if f.endswith(".wav")}
                    for f in os.listdir(audio_folder) if f.endswith((".WAV", ".wav"))}
     label_files = {os.path.splitext(f)[0]: os.path.join(label_folder, f)
                    for f in os.listdir(label_folder) if f.endswith(".json")}
-    # Only keep pairs where both audio and label exist
     common_keys = set(audio_files.keys()) & set(label_files.keys())
     audio_paths = [audio_files[k] for k in sorted(common_keys)]
 
@@ -44,14 +58,13 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
     return audio_paths, label_paths
 
 def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
+    """Match label files to audio by stem (label stem must be contained in audio filename)."""
     audio_files = [f for f in os.listdir(audio_folder) if f.endswith((".WAV", ".wav"))]
     label_files = [f for f in os.listdir(label_folder) if f.endswith((".json", ".jsonr"))]
 
     audio_paths, label_paths = [], []
     for label in label_files:
-        #key = os.path.splitext(label)[0]  # "LEMUR123"
         key = os.path.splitext(label)[0].replace("_preds", "")
-        # suche Audio, das diesen Key enthält
         match = [a for a in audio_files if key in a]
         if match:
             audio_paths.append(os.path.join(audio_folder, match[0]))
@@ -59,16 +72,14 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
 
     return audio_paths, label_paths
 
-def get_cluster_codebook( label_paths, initial_cluster_codebook ):
-    cluster_codebook = deepcopy( initial_cluster_codebook )
-    
+def get_cluster_codebook(label_paths, initial_cluster_codebook):
+    """Build cluster name -> class id mapping from label files, extending initial codebook."""
+    cluster_codebook = deepcopy(initial_cluster_codebook)
     unique_clusters = []
     for label_file in label_paths:
-        label = json.load( open(label_file) )
-        unique_clusters += [ str(cluster) for cluster in label["cluster"]   ]
-            
+        label = json.load(open(label_file))
+        unique_clusters += [str(cluster) for cluster in label["cluster"]]
     unique_clusters = sorted(list(set(unique_clusters)))
-    
     for cluster in unique_clusters:
         if cluster not in cluster_codebook:
             cluster_codebook[cluster] = len(cluster_codebook)
@@ -77,23 +88,19 @@ def get_cluster_codebook( label_paths, initial_cluster_codebook ):
 
 
 def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None):
-    """
-    Erzeugt ein Cluster-Codebook aus gegebenen Label-Dateien.
-    
-    Parameter:
-    ----------
-    label_paths : list[str]
-        Liste der Pfade zu JSON-Label-Dateien. Jede Datei enthält 'cluster'.
-    initial_cluster_codebook : dict
-        Bereits existierendes Codebook {cluster_name: class_id}.
-    make_equal : None | list[str] | 'all', optional
-        - None: Standardverhalten (keine Änderungen)
-        - list[str]: Alle Cluster in dieser Liste werden auf die gleiche Klasse gemappt.
-        - 'all': Alle Cluster werden auf die gleiche Klasse gemappt.
+    """Build a cluster codebook from label files.
+
+    Args:
+        label_paths: Paths to JSON label files; each must contain 'cluster'.
+        initial_cluster_codebook: Existing mapping {cluster_name: class_id}.
+        make_equal: Optional. None: no merging. list[str]: merge these clusters to one class.
+            'all': merge all clusters into one class.
+
+    Returns:
+        Updated cluster_codebook dict.
     """
     cluster_codebook = deepcopy(initial_cluster_codebook)
 
-    # --- Alle Cluster sammeln ---
     all_clusters = []
     for label_file in label_paths:
         with open(label_file, 'r') as f:
@@ -101,7 +108,6 @@ def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None)
         all_clusters += [str(cluster) for cluster in label.get("cluster", [])]
 
 
-    # --- Alle Cluster aus den Label-Dateien sammeln ---
     unique_clusters = []
     for label_file in label_paths:
         with open(label_file, 'r') as f:
@@ -110,55 +116,40 @@ def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None)
 
     unique_clusters = sorted(list(set(unique_clusters)))
 
-    # --- Häufigkeiten zählen ---
     top_k = 10
     cluster_counts = Counter(all_clusters)
-    print(f"\n📊 Top 10 häufigste Cluster:")
+    print("\nTop 10 most frequent clusters:")
     for cluster, count in cluster_counts.most_common(top_k):
-        print(f"   {cluster:20s} -> {count} Vorkommen")
+        print(f"   {cluster:20s} -> {count} occurrences")
 
-    # --- make_equal verarbeiten ---
     if make_equal == 'all':
-        # Alle Cluster sollen dieselbe Klasse teilen
         target_class_id = cluster_codebook.get("__merged__", len(cluster_codebook))
         cluster_codebook["__merged__"] = target_class_id
         for cluster in unique_clusters:
             cluster_codebook[cluster] = target_class_id
 
     elif isinstance(make_equal, (list, set, tuple)):
-        # Cluster aus der make_equal-Liste auf eine Klasse mappen
         make_equal = [str(c) for c in make_equal]
         target_class_id = None
-
-        # Falls einer der Namen schon im Codebook existiert, diese ID benutzen
         for c in make_equal:
             if c in cluster_codebook:
                 target_class_id = cluster_codebook[c]
                 break
-
-        # Falls noch nicht vorhanden, neue Klasse anlegen
         if target_class_id is None:
             target_class_id = len(cluster_codebook)
             cluster_codebook[make_equal[0]] = target_class_id
-
-        # Alle Cluster aus make_equal auf dieselbe Klasse mappen
         for c in make_equal:
             cluster_codebook[c] = target_class_id
-
-        # Alle übrigen Cluster normal hinzufügen
         for cluster in unique_clusters:
             if cluster not in cluster_codebook:
                 cluster_codebook[cluster] = len(cluster_codebook)
 
     else:
-        # Standardfall: alles normal hinzufügen
         for cluster in unique_clusters:
             if cluster not in cluster_codebook:
                 cluster_codebook[cluster] = len(cluster_codebook)
 
-    # --- Anzahl der Klassen ausgeben ---
     num_classes_new = len(set(cluster_codebook.values()))
-
     print(f"Number of Classes in Codebook: {num_classes_new}")
 
 
@@ -209,20 +200,21 @@ FIXED_CLUSTER_CODEBOOK = {
 
 #ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
-# Optional: inverse Mapping für spätere Rekonstruktion
-#ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
+# Optional: inverse mapping for reconstruction
+# ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
 
-ID_TO_CLUSTER  = {
+ID_TO_CLUSTER = {
     0: "m", 
     1: "h",   
     2: "w",   
 }
 
-def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook ):
+def load_audio_and_label(audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook):
+    """Load audio and labels for a chunk of paths; store results in audio_dict[label_dict] by thread_id."""
     local_audio_list = []
     local_label_list = []
-    
+
     for audio_path, label_path in tqdm(zip(audio_path_list, label_path_list), desc="load_data", disable=is_scheduled_job(), leave=False):
         label = json.load(open( label_path ))
         y, _ = librosa.load( audio_path, sr = 16000 )
@@ -241,14 +233,11 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
         offset_arr[ offset_arr > len(y)/label["sr"] ] = len(y)/label["sr"]
 
         label["cluster"] = [ label["cluster"][idx] for idx in np.argwhere(valid_indices)[:,0] ]  
-        # Handle quality (optional)
         if "quality" in label:
             label["quality"] = [label["quality"][idx] for idx in np.argwhere(valid_indices)[:, 0]]
         else:
-            # Fill with 'unknown' for each valid entry
             label["quality"] = ['unknown'] * len(label["cluster"])
-        #label["quality"] = [ label["quality"][idx] for idx in np.argwhere(valid_indices)[:,0] ]       
-        cluster_id_arr = np.array( [ cluster_codebook[ str(value) ] for value in label["cluster"] ]  )
+        cluster_id_arr = np.array([cluster_codebook[str(value)] for value in label["cluster"]])
         quality_id_arr = np.array(label["quality"])
         
         label.update( {
@@ -262,8 +251,9 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
     audio_dict[thread_id] = local_audio_list
     label_dict[thread_id] = local_label_list
 
-def load_data(audio_path_list, label_path_list, cluster_codebook = None, n_threads = 1 ):
-    samples_per_thread = int(np.ceil( len(audio_path_list) / n_threads ))
+def load_data(audio_path_list, label_path_list, cluster_codebook=None, n_threads=1):
+    """Load audio and labels in parallel; returns (audio_list, label_list) with cluster_id in labels."""
+    samples_per_thread = int(np.ceil(len(audio_path_list) / n_threads))
     audio_dict = {}
     label_dict = {}
     thread_list = []
@@ -310,12 +300,10 @@ def split_audio_and_label( audio, label, split_ratio ):
         "cluster_id":label["cluster_id"][intersected_indices_part1],
         "cluster": [ label["cluster"][idx] for idx in np.argwhere( intersected_indices_part1 )[:,0]  ]
     })
-    ## drop too short audios
     if len(audio_part1) / label["sr"] < 0.1:
         audio_part1 = None
         label_part1 = None
-    
-    
+
     audio_part2 = audio[ split_point: ]
     intersected_indices_part2 = label["offset"] > split_time
     label_part2 = deepcopy( label )
@@ -327,7 +315,6 @@ def split_audio_and_label( audio, label, split_ratio ):
         "cluster": [ label["cluster"][idx] for idx in np.argwhere( intersected_indices_part2 )[:,0] ]
     })
 
-    ## drop too short audios
     if len(audio_part2) / label["sr"] < 0.1:
         audio_part2 = None
         label_part2 = None
@@ -348,16 +335,15 @@ def split_audio_and_label( audio, label, split_ratio ):
         "quality": [ label["quality"][idx] for idx in np.argwhere( intersected_indices_part1 )[:,0]  ]
 
     })
-    ## drop too short audios
     if len(audio_part1) / label["sr"] < 0.1:
         audio_part1 = None
         label_part1 = None
-    
-    return ( audio_part1, label_part1 )
+
+    return (audio_part1, label_part1)
 
 
-def train_val_split( audio_list, label_list, val_ratio ):
-    
+def train_val_split(audio_list, label_list, val_ratio):
+    """Randomly split each (audio, label) pair into train/val segments by val_ratio."""
     audio_list_train = []
     label_list_train = []
     audio_list_val = []
@@ -384,16 +370,14 @@ def train_val_split( audio_list, label_list, val_ratio ):
 
 
 
-#for majority voting
 def make_trials(audio_list, label_list, total_spec_columns, num_trials=3):
-    """Erzeuge mehrere überlappende Trials (z. B. mit 1/3 versetzt)."""
+    """Create multiple overlapping trials (e.g. offset by 1/3) for majority voting."""
     all_audio, all_label, all_meta = [], [], []
     hop = total_spec_columns // num_trials
     for trial in range(num_trials):
         audios, labels, metas = slice_audios_and_labels(
             audio_list, label_list, total_spec_columns, offset=trial*hop
         )
-        # Jede Meta-Info bekommt die Trial-ID
         for m in metas:
             m["trial"] = trial
         all_audio.extend(audios)
@@ -403,17 +387,17 @@ def make_trials(audio_list, label_list, total_spec_columns, num_trials=3):
 
 
 
-###vorsicht: ohen left padding!!!!!!
 def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_trials=1):
-    """
-    Slice audios into overlapping segments with different offsets (0, 1/3, 2/3).
-    Returns expanded audio_list, label_list, metadata_list with offset_frac.
-    """
+    """Slice audios into overlapping segments with different offsets (e.g. 0, 1/3, 2/3).
 
+    Returns:
+        Expanded (new_audios, new_labels, new_metadata) with offset_frac in metadata.
+    Note:
+        No left padding is applied.
+    """
     new_audios, new_labels, new_metadata = [], [], []
-    sec_per_col = 0.01
     spec_time_step = 0.01
-    total_spec_columns=3000
+    total_spec_columns = 3000
 
     for orig_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
         sr = 16000
@@ -421,7 +405,6 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
         num_samples_in_clip = int(round(clip_duration * sr))
 
         for trial in range(num_trials):
-            # Versatz in Samples (0, 1/3, 2/3 des Clip)
             frac = trial / num_trials
             offset_samples = int(round(frac * num_samples_in_clip))
 
@@ -436,13 +419,11 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
                 #    break
 
 
-                # Labels anpassen: nur Events im Zeitfenster behalten
                 start_time = start / sr
                 end_time = end / sr
                 intersected_indices = np.logical_and(
                     label["onset"] < end_time, label["offset"] > start_time
                 )
-
                 label_clip = deepcopy(label)
                 label_clip.update({
                     "onset": np.maximum(label["onset"][intersected_indices], start_time) - start_time,
@@ -451,8 +432,6 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
                     "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
                     "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
                 })
-
-                # speichern
                 new_audios.append(audio_clip)
                 new_labels.append(label_clip)
                 new_metadata.append({
@@ -468,17 +447,17 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, num_tria
 
     return new_audios, new_labels, new_metadata
 
-###vorsicht: ohen left padding!!!!!!
 def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0):
-    """
-    Slice audios into overlapping segments with different offsets (0, 1/3, 2/3).
-    Returns expanded audio_list, label_list, metadata_list with offset_frac.
-    """
+    """Slice audios into fixed-length segments with given sample offset.
 
+    Returns:
+        (new_audios, new_labels, new_metadata) with offset/trial_id in metadata.
+    Note:
+        No left padding is applied.
+    """
     new_audios, new_labels, new_metadata = [], [], []
-    sec_per_col = 0.01
     spec_time_step = 0.01
-    total_spec_columns=3000
+    total_spec_columns = 3000
 
     for orig_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
         sr = 16000
@@ -492,11 +471,6 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0
             end = start + num_samples_in_clip
             audio_clip = audio[start:end]
 
-            #if len(audio_clip) < sr * 0.1:  # skip super short
-            #    break
-
-
-            # Labels anpassen: nur Events im Zeitfenster behalten
             start_time = start / sr
             end_time = end / sr
             intersected_indices = np.logical_and(
@@ -511,27 +485,24 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0
                 "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
                 "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
             })
-
-            # speichern
             new_audios.append(audio_clip)
             new_labels.append(label_clip)
             new_metadata.append({
                 "original_idx": orig_idx,
                 "segment_idx": seg_idx,
-                "offset_frac": offset,   # tells us in which trial we are, by giving us the offset
+                "offset_frac": offset,
                 "trial_id": offset
             })
-
             start += num_samples_in_clip
             seg_idx += 1
-
 
     return new_audios, new_labels, new_metadata
 
 
-#for WhisperSeg not WhisperFormer
 class VocalSegDataset(Dataset):
-    def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, species_codebook ):
+    """Dataset for WhisperSeg (not WhisperFormer): tokenized segments with decoder labels."""
+
+    def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, species_codebook):
         self.audio_list = audio_list
         self.label_list = label_list
         self.feature_extractor_bank = self.get_feature_extractor_bank( label_list )
@@ -540,7 +511,8 @@ class VocalSegDataset(Dataset):
         self.total_spec_columns = total_spec_columns
         self.species_codebook = species_codebook
         
-    def get_feature_extractor_bank(self, label_list ):
+    def get_feature_extractor_bank(self, label_list):
+        """Build a bank of feature extractors keyed by (sr, spec_time_step, min_frequency)."""
         feature_extractor_bank = {}
         for label in label_list:
             key = "%s-%s-%s"%( str( label["sr"] ), str(label["spec_time_step"]), str(label["min_frequency"]) )
@@ -548,8 +520,9 @@ class VocalSegDataset(Dataset):
                 feature_extractor_bank[key] = WhisperFeatureExtractor( label["sr"], label["spec_time_step"], label["min_frequency"] )
         return feature_extractor_bank
         
-    def map_time_to_spec_col_index(self, t, spec_time_step ):
-        return min( int(np.round( t/( spec_time_step * RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP ) )), self.total_spec_columns  )
+    def map_time_to_spec_col_index(self, t, spec_time_step):
+        """Map time in seconds to spectrogram column index."""
+        return min(int(np.round(t / (spec_time_step * RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP))), self.total_spec_columns)
         
     def __len__(self):
         return len(self.audio_list)

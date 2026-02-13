@@ -9,12 +9,12 @@ import json
 
 
 def confusion_matrix_framewise(prediction: np.ndarray, label: np.ndarray, cluster_to_id_mapper: dict):
-    """Create a confusion matrix from frame-wise scores
+    """Create a confusion matrix from frame-wise scores.
 
     Args:
-        prediction (np.ndarray): Numpy array containing predictions
-        label (np.ndarray): Numpy array containing labels
-        time_per_frame_for_scoring (float, optional): Bin-size for frame-wise scoring. Defaults to 0.01.
+        prediction: Frame-wise prediction array.
+        label: Frame-wise label array.
+        cluster_to_id_mapper: Dict mapping cluster names to integer IDs.
     """
     # sort both numerical and alphabetical labels by the alphabetical order
     labels_alpha, labels_num = zip(*sorted(zip(cluster_to_id_mapper.keys(), cluster_to_id_mapper.values())))

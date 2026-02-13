@@ -230,20 +230,25 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
     return preds_by_slice
 
 def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
-    """
-    Rekonstruiert alle Vorhersagen aus Slice-Koordinaten in Datei-Zeitkoordinaten.
-    Gibt ein Dict mit Listen zurück: {"onset": [], "offset": [], "cluster": [], "score": []}
+    """Reconstruct predictions from slice (frame) coordinates to file time coordinates.
+
+    Args:
+        preds_by_slice: List of per-slice predictions with original_idx, segment_idx, preds.
+        total_spec_columns: Total spectrogram columns (decoder time steps are half).
+        ID_TO_CLUSTER: Mapping from class id to cluster name.
+
+    Returns:
+        Dict with lists: onset, offset, cluster, score, orig_idx.
     """
     grouped_preds = defaultdict(list)
     for ps in preds_by_slice:
         grouped_preds[ps["original_idx"]].append(ps)
 
     sec_per_col = 0.02
-    cols_per_segment = total_spec_columns // 2  # T entspricht total_spec_columns/2
+    cols_per_segment = total_spec_columns // 2
 
     all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
 
-    # Über alle Originaldateien iterieren
     for orig_idx in sorted(grouped_preds.keys()):
         segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
         for seg in segs_sorted:
@@ -255,8 +260,6 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
                     end_sec   = (offset_cols + end_col)   * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
-                    # Map Klasse-ID -> Cluster-Label
-                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
                     all_preds_final["score"].append(float(score))
                     all_preds_final["orig_idx"].append(orig_idx)
@@ -264,11 +267,14 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
     return all_preds_final
 
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
-    """
-    intervals: Tensor [N, 3] -> (start, end, score)
-    iou_threshold: IoU Threshold for suppression
+    """Non-maximum suppression for 1D intervals.
 
-    returns: Tensor [M, 3] of kept intervals
+    Args:
+        intervals: Tensor [N, 3] (start, end, score).
+        iou_threshold: IoU threshold for suppression.
+
+    Returns:
+        Tensor [M, 3] of kept intervals.
     """
     if intervals.numel() == 0:
         return intervals.new_zeros((0, 3))
@@ -307,9 +313,9 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
 
 
 def group_by_file(all_preds, all_labels, metadata_list):
+    """Group predictions and labels by file index (orig_idx)."""
     num_files = 38
 
-    # Leere Strukturen für alle Files anlegen
     preds_grouped = [
         {"onset": [], "offset": [], "cluster": [], "score": []}
         for _ in range(num_files)
@@ -401,8 +407,8 @@ class EarlyStopping:
                 self.should_stop = True
 
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = None):
-
+def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities=None):
+    """Compute precision, recall, F1 with separate false-class count; optionally filter labels by quality."""
     label_onsets   = labels['onset']
     label_offsets  = labels['offset']
     label_clusters = labels['cluster']
@@ -506,12 +512,21 @@ def losses_val(
         loss_normalizer_momentum=0.8,
         class_weights=None   
     ):
-    """
-    out_cls_logits: Rohlogits der Klassen [B, T, C]
-    gt_cls_labels:  One-Hot Labels [B, T, C]
-    class_weights:  Tensor [C], höhere Werte für seltene Klassen
-    """
+    """Compute classification (focal) and regression (DIoU) loss for validation.
 
+    Args:
+        out_cls_logits: Raw class logits [B, T, C].
+        out_offsets: Predicted offsets [B, T, 2].
+        gt_cls_labels: One-hot labels [B, T, C].
+        gt_offsets: Ground-truth offsets [B, T, 2].
+        train_loss_weight: Weight for regression term.
+        loss_normalizer: Unused (kept for API).
+        loss_normalizer_momentum: Unused (kept for API).
+        class_weights: Optional [C] tensor; higher for rare classes.
+
+    Returns:
+        Tuple (cls_loss, reg_loss, final_loss).
+    """
     B, T, C = out_cls_logits.shape
     assert gt_cls_labels.shape == (B, T, C)
     assert out_offsets.shape == (B, T, 2)
@@ -572,21 +587,17 @@ def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_d
     # Create WhisperFormer model with the correct number of classes
     model = WhisperFormer(encoder=encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers, dropout=dropout)
     
-    # Load pretrained weights if available ACHTUNG RICHTIGE GRÖSSE TESTEN!
+    # Load pretrained weights if available (ensure model size matches checkpoint)
     if initial_model_path and os.path.exists(initial_model_path):
         print(f"Loading pretrained weights from {initial_model_path}")
         model.load_state_dict(torch.load(initial_model_path, map_location='cpu'))
     
     return model
 
-# for debugging
 def actionformer_train_iteration(model, batch, optimizer, scheduler, scaler, device):
-    """
-    Training iteration für ActionFormer mit AMP Debugging.
-    Prüft Gradienten, Logits, Shapes etc. ohne das Training zu unterbrechen.
-    """
-    # Batch auf Device
-    #for key in batch:
+    """One training step for ActionFormer with optional AMP; for debugging gradients/logits/shapes."""
+    # Move batch to device
+    # for key in batch:
     #    batch[key] = batch[key].to(device)
     for k, v in batch.items():
         if isinstance(v, torch.Tensor):
@@ -653,7 +664,7 @@ num_classes, low_quality_value, batch_size, num_workers, collate_fn, ID_TO_CLUST
     device=device,
     threshold=0,
     iou_threshold=iou_threshold,
-    metadata_list=metadata_list     # from slice_audios_and_labels
+    metadata_list=metadata_list
     )
 
     final_preds = reconstruct_predictions(

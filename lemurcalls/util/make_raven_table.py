@@ -12,7 +12,7 @@ def make_raven_tables(file_path: str, extension: str, config_path: str, output_p
 
     Args:
         file_path (str): Path to .jsonr inference files.
-        extension (str): Extention of the inference files: either jsonr or json, defaults to jsonr
+        extension (str): Extension of the inference files: either jsonr or json, defaults to jsonr.
         config_path (str): Path to the config file detailing all annotation classes.
         output_path (str, optional): Path to an output directory. Defaults to the input directory.
     """
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Converts WhisperSeg inference results into Raven selection tables")
     parser.add_argument("-p", "--file_path", type=str, help="Path to inference files", required=True)
-    parser.add_argument("-e", "--extension", type=str, help="Extention of the inference files: either jsonr or json", default="jsonr")
+    parser.add_argument("-e", "--extension", type=str, help="Extension of the inference files: either jsonr or json", default="jsonr")
     parser.add_argument("-c", "--config_path", type=str, help="Path to the config file detailing all annotation classes", default='./config/classes.yaml')
     parser.add_argument("-o", "--output_path", type=str, help="Path to the output .txt  selection table files. Defaults to the input directory.", default=None)
     args = parser.parse_args()

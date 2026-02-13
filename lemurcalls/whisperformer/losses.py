@@ -75,15 +75,17 @@ def ctr_giou_loss_1d(
                  'none': No reduction will be applied to the output.
                  'mean': The output will be averaged.
                  'sum': The output will be summed.
-        eps (float): small number to prevent division by zero
+        eps (float): small number to prevent division by zero.
+
+    Returns:
+        Loss tensor with the reduction option applied.
     """
     input_offsets = input_offsets.float()
     target_offsets = target_offsets.float()
-    # check all 1D events are valid
     assert (input_offsets >= 0.0).all(), "predicted offsets must be non-negative"
     assert (target_offsets >= 0.0).all(), "GT offsets must be non-negative"
 
-    #lp, rp = input_offsets[0, :], input_offsets[1, :]
+    # lp, rp = input_offsets[0, :], input_offsets[1, :]
     #lg, rg = target_offsets[0, :], target_offsets[1, :]
     lp, rp = input_offsets[:, 0], input_offsets[:, 1]
     lg, rg = target_offsets[:, 0], target_offsets[:, 1]
@@ -131,15 +133,16 @@ def ctr_diou_loss_1d(
                  'none': No reduction will be applied to the output.
                  'mean': The output will be averaged.
                  'sum': The output will be summed.
-        eps (float): small number to prevent division by zero
+        eps (float): small number to prevent division by zero.
+
+    Returns:
+        Loss tensor with the reduction option applied.
     """
     input_offsets = input_offsets.float()
     target_offsets = target_offsets.float()
-    # check all 1D events are valid
     assert (input_offsets >= 0.0).all(), "predicted offsets must be non-negative"
     assert (target_offsets >= 0.0).all(), "GT offsets must be non-negative"
-    #print(input_offsets.shape)
-    #lp, rp = input_offsets[0, :], input_offsets[1, :]
+    # lp, rp = input_offsets[0, :], input_offsets[1, :]
     #lg, rg = target_offsets[0, :], target_offsets[1, :]
     lp, rp = input_offsets[:, 0], input_offsets[:, 1]
     lg, rg = target_offsets[:, 0], target_offsets[:, 1]

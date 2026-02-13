@@ -26,6 +26,16 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 # ==================== MODEL LOADING ====================
 
 def load_trained_whisperformer(checkpoint_path, num_classes, device):
+    """Load a trained WhisperFormer from checkpoint.
+
+    Args:
+        checkpoint_path: Path to the state dict checkpoint.
+        num_classes: Number of output classes for the head.
+        device: Device to load the model to.
+
+    Returns:
+        WhisperFormer model in eval mode.
+    """
     whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
     encoder = whisper_model.encoder
     model = WhisperFormer(encoder, num_classes=num_classes)
@@ -39,6 +49,15 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
 # ==================== NMS ====================
 
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
+    """Non-maximum suppression for 1D intervals (start, end, score). Keeps high-score non-overlapping intervals.
+
+    Args:
+        intervals: Tensor of shape (N, 3) with (start, end, score).
+        iou_threshold: Intervals with IoU above this are suppressed.
+
+    Returns:
+        Tensor of kept intervals, shape (K, 3).
+    """
     if intervals.numel() == 0:
         return intervals.new_zeros((0, 3))
     starts, ends, scores = intervals[:, 0], intervals[:, 1], intervals[:, 2]
@@ -109,6 +128,7 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold):
 
 
 def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.001):
+    """Compute TP, FP, FN, FC, precision, recall, F1 (basic version, no fp_scores/fn_qualities)."""
     label_onsets = np.array(labels['onset'])
     label_offsets = np.array(labels['offset'])
     label_clusters = np.array(labels['cluster'])
@@ -160,8 +180,8 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
     matched_labels = set()
     matched_preds = set()
     false_class = 0
-    fp_scores = []           # Scores aller False Positives
-    fn_qualities = []        # Quality-Klassen aller False Negatives
+    fp_scores = []           # Scores of all false positives
+    fn_qualities = []        # Quality classes of all false negatives
 
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
         for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
@@ -177,12 +197,12 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
                     false_class += 1
                 break
 
-    # False Positives = alle nicht gematchten Predictions
+    # False positives = all unmatched predictions
     for p_idx in range(len(pred_onsets)):
         if p_idx not in matched_preds:
             fp_scores.append(pred_scores[p_idx])
 
-    # False Negatives = alle nicht gematchten Labels
+    # False negatives = all unmatched labels
     for l_idx in range(len(label_onsets)):
         if l_idx not in matched_labels:
             fn_qualities.append(label_qualities[l_idx])
@@ -208,9 +228,21 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
         'fn_qualities': fn_qualities
     }
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance=0.001, allowed_qualities = {1,2}):
-    # Falls Qualitätsfilter gesetzt: GT filtern
+def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance=0.001, allowed_qualities={1, 2}):
+    """Compute detection metrics (TP, FP, FN, FC, precision, recall, F1) with optional quality filtering.
 
+    If allowed_qualities is set, ground-truth labels are filtered to those quality values before matching.
+
+    Args:
+        labels: Dict with 'onset', 'offset', 'cluster', 'quality'.
+        predictions: Dict with 'onset', 'offset', 'cluster'.
+        overlap_tolerance: Minimum overlap ratio for a match.
+        allowed_qualities: If not None, restrict GT to these quality values.
+
+    Returns:
+        dict: gtp, pp, tp, fp, fn, fc, precision, recall, f1.
+    """
+    # If quality filter is set: filter GT
     label_onsets   = labels['onset']
     label_offsets  = labels['offset']
     label_clusters = labels['cluster']
@@ -218,7 +250,7 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     #print(label_qualities)
 
     if allowed_qualities is not None:
-        # auf Strings normalisieren, damit {1,2} oder {"1","2"} beides funktioniert
+        # Normalize to strings so that {1,2} or {"1","2"} both work
         allowed_str = set(str(q) for q in allowed_qualities)
         qual_str = np.array([str(q) for q in label_qualities])
         mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
@@ -227,9 +259,9 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         label_onsets = np.array(label_onsets)[mask]
         label_offsets = np.array(label_offsets)[mask]
         label_clusters = np.array(label_clusters)[mask]
-        # label_qualities wird danach nicht mehr gebraucht
+        # label_qualities not needed after this
 
-    # Predictions laden
+    # Load predictions
     pred_onsets = np.array(predictions['onset'])
     pred_offsets = np.array(predictions['offset'])
     pred_clusters = np.array(predictions['cluster'])
@@ -239,7 +271,7 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     matched_preds = set()
     false_class = 0
 
-    gtp = len(label_onsets)      # jetzt nur noch Quality∈allowed
+    gtp = len(label_onsets)      # Now only quality in allowed set
     pp  = len(pred_onsets)
 
     # Matching
@@ -289,16 +321,16 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
-    # === Zeitgestempelten Unterordner erstellen ===
+    # Create timestamped subfolder
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = os.path.join(args.output_dir, timestamp)
     os.makedirs(save_dir, exist_ok=True)
 
-    # === Argumente speichern ===
+    # Save arguments
     args_path = os.path.join(save_dir, "run_arguments.json")
     with open(args_path, "w") as f:
         json.dump(vars(args), f, indent=2)
-    print(f"✅ Argumente gespeichert unter: {args_path}")
+    print(f"Arguments saved to: {args_path}")
 
     #os.makedirs(args.output_dir, exist_ok=True)
 
@@ -331,7 +363,7 @@ if __name__ == "__main__":
                 "intervals": pred["intervals"]
             })
 
-        # Rekonstruktion
+        # Reconstruction: map segment indices and columns back to seconds
         sec_per_col = 0.02
         segs_sorted = sorted(grouped_preds[0], key=lambda x: x["segment_idx"])
         classes, onsets, offsets, scores = [], [], [], []
@@ -348,28 +380,28 @@ if __name__ == "__main__":
 
         final_preds = {"onset": onsets, "offset": offsets, "cluster": classes, "score": scores}
 
-        # Predictions pro Datei speichern
+        # Save predictions per file
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
         json_path = os.path.join(save_dir, f"{base_name}_preds.json")
         with open(json_path, "w") as f:
             json.dump(final_preds, f, indent=2)
-        print(f"✅ Predictions saved to {json_path}")
+        print(f"Predictions saved to {json_path}")
 
-        # Labels laden
+        # Load labels
         with open(label_path, "r") as f:
             labels = json.load(f)
         
         clusters = labels["cluster"]
         labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
-        # Quality-Klassen hinzufügen
+        # Add quality classes
         if "quality" in labels:
             quality_list = labels["quality"]
         else:
             quality_list = ["unknown"] * len(labels["onset"])
 
 
-        # --- globale Sammler befüllen ---
+        # Fill global collectors
         all_labels["onset"].extend(labels["onset"])
         all_labels["offset"].extend(labels["offset"])
         all_labels["cluster"].extend(labels["cluster"])
@@ -394,13 +426,13 @@ if __name__ == "__main__":
 
     from collections import Counter
 
-    # Häufigkeiten der FN-Quality-Klassen
+    # Frequencies of FN quality classes
     fn_quality_counts = Counter(metrics['fn_qualities'])
     """
     metrics_path = os.path.join(save_dir, "metrics_all_qualities.txt")
 
     with open(metrics_path, "w") as f:
-        f.write(f"Globale Metriken für threshold {args.threshold} und iou threshold {args.iou_threshold}: \n")
+        f.write(f"Global metrics for threshold {args.threshold} and iou threshold {args.iou_threshold}:\n")
         f.write(f"TP: {metrics['tp']}\n")
         f.write(f"FP: {metrics['fp']}\n")
         f.write(f"FN: {metrics['fn']}\n")
@@ -409,24 +441,24 @@ if __name__ == "__main__":
         f.write(f"Recall:    {metrics['recall']:.4f}\n")
         f.write(f"F1-Score:  {metrics['f1']:.4f}\n\n")
         """
-        f.write("Recall pro Quality-Klasse:\n")
+        f.write("Recall per quality class:\n")
         for q, r in recall_per_quality.items():
             f.write(f"  {q}: {r:.4f}\n")
 
-        f.write("\nScores der False Positives:\n")
+        f.write("\nScores of false positives:\n")
         f.write(", ".join([f"{s:.3f}" for s in metrics['fp_scores']]) + "\n")
 
         f.write("\nQuality-Klassen der False Negatives (Häufigkeit):\n")
         for q, count in fn_quality_counts.items():
-            f.write(f"  Klasse {q}: {count}\n")
+            f.write(f"  Class {q}: {count}\n")
     """
-    print(f"✅ Globale Metriken gespeichert unter {metrics_path}")
+    print(f"Global metrics saved to {metrics_path}")
 
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
-    # ---- Confusion Matrix für Klassen + None ----
-    all_classes = sorted(set(all_labels["cluster"]))   # alle echten Klassen
-    class_names = all_classes + ["None"]               # zusätzliche None-Klasse
+    # Confusion matrix for classes + None
+    all_classes = sorted(set(all_labels["cluster"]))   # All true classes
+    class_names = all_classes + ["None"]               # Additional None class
 
     y_true = []
     y_pred = []
@@ -434,7 +466,7 @@ if __name__ == "__main__":
     matched_labels = set()
     matched_preds = set()
 
-    # Match Events wie bei evaluate_detection_metrics_with_false_class
+    # Match events as in evaluate_detection_metrics_with_false_class
     overlap_tolerance = 0.001
     for p_idx, (po, pf, pc) in enumerate(zip(all_preds_final['onset'],
                                             all_preds_final['offset'],
@@ -450,38 +482,38 @@ if __name__ == "__main__":
             if overlap_ratio > overlap_tolerance:
                 matched_labels.add(l_idx)
                 matched_preds.add(p_idx)
-                # korrekt lokalisiert → check Klassen
+                # Correctly localized: check class
                 if lc == pc:
                     y_true.append(lc)
                     y_pred.append(pc)
                 else:
-                    # falsche Klasse
+                    # Wrong class
                     y_true.append(lc)
                     y_pred.append(pc)
 
-    # False Negatives (Labels ohne Match)
+    # False negatives (labels without match)
     for l_idx, lc in enumerate(all_labels['cluster']):
         if l_idx not in matched_labels:
             y_true.append(lc)
             y_pred.append("None")
 
-    # False Positives (Preds ohne Match)
+    # False positives (predictions without match)
     for p_idx, pc in enumerate(all_preds_final['cluster']):
         if p_idx not in matched_preds:
             y_true.append("None")
             y_pred.append(pc)
 
-    # ---- Confusion Matrix berechnen und plotten ----
+    # Compute and plot confusion matrix
     cm = confusion_matrix(y_true, y_pred, labels=class_names)
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
     fig, ax = plt.subplots(figsize=(8, 6))
     disp.plot(ax=ax, cmap="Blues", xticks_rotation=45)
-    plt.title("Confusion-Matrix (Klassen + None)")
+    plt.title("Confusion matrix (classes + None)")
     plt.tight_layout()
 
     cm_path = os.path.join(save_dir, "confusion_matrix_classes_none.png")
     plt.savefig(cm_path, dpi=150)
     plt.close()
 
-    print(f"✅ Confusion-Matrix gespeichert unter {cm_path}")
+    print(f"Confusion matrix saved to {cm_path}")

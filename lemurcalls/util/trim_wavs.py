@@ -9,11 +9,18 @@ from scipy.io import wavfile
 
 
 def trim_wavs(file_path: str, safety_padding: float = 1.0, skip_wavs: bool = False) -> None:
-    """Trims unannotated content from front and back of .wav audio recordings in given directory based on their onset and offset times from the associated json files. This overwrites the original .wav files with the trimmed versions and saves information about length of trimmed content to disk.
+    """Trim unannotated content from front and back of .wav files based on onset/offset in associated JSON.
+
+    Overwrites .wav files with trimmed versions and updates JSON times. Optionally skips WAV trimming
+    and only updates JSON. Writes CSV of trimmed lengths to results/ if not skip_wavs.
 
     Args:
-        file_path (str): Path to directory containing .wav and .json files
-        safety_padding (float, optional): Extra time to leave as padding at the front and back of the trimmed audio files, in seconds. Defaults to 1.0.
+        file_path: Path to directory containing .wav and .json files.
+        safety_padding: Extra seconds of padding at front and back. Defaults to 1.0.
+        skip_wavs: If True, do not trim .wav files; only update .json times. Defaults to False.
+
+    Returns:
+        None.
     """
     csv_records = []
 

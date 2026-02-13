@@ -4,11 +4,11 @@ import numpy as np
 import os
 import argparse
 
-parser = argparse.ArgumentParser(description="Filtere Labels nach Amplituden-Threshold für einen ganzen Ordner.")
-parser.add_argument("--wav_dir", required=True, help="Pfad zum WAV-Ordner")
-parser.add_argument("--labels_dir", required=True, help="Pfad zum Labels-Ordner")
-parser.add_argument("--output_dir", required=True, help="Pfad zum Ausgabe-Ordner")
-parser.add_argument("--amplitude_threshold", type=float, required=True, help="Amplitude-Threshold (z.B. 0.05)")
+parser = argparse.ArgumentParser(description="Filter labels by amplitude threshold for a whole directory.")
+parser.add_argument("--wav_dir", required=True, help="Path to WAV directory")
+parser.add_argument("--labels_dir", required=True, help="Path to labels directory")
+parser.add_argument("--output_dir", required=True, help="Path to output directory")
+parser.add_argument("--amplitude_threshold", type=float, required=True, help="Amplitude threshold (e.g. 0.05)")
 args = parser.parse_args()
 
 wav_dir = args.wav_dir
@@ -64,5 +64,5 @@ for root, _, files in os.walk(labels_dir):
         with open(output_path, "w") as f:
             json.dump(filtered_labels, f, indent=2)
 
-        print(f"Gefilterte Labels gespeichert in: {output_path}")
-        print(f"Anzahl der übrig gebliebenen Labels: {len(filtered_onsets)}")
+        print(f"Filtered labels saved to: {output_path}")
+        print(f"Remaining labels: {len(filtered_onsets)}")

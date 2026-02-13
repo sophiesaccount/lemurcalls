@@ -60,14 +60,14 @@ def main():
     
 
     if len(audio_files) == 0:
-        print("❌ No .wav files found in", args.audio_folder)
+        print("No .wav files found in", args.audio_folder)
         return
     if len(label_files) == 0:
-        print("❌ No .json label files found in", args.label_folder)
+        print("No .json label files found in", args.label_folder)
         return
 
-    print(f"🔍 Found {len(audio_files)} audio files.")
-    print(f"🔍 Found {len(label_files)} label files.")
+    print(f"Found {len(audio_files)} audio files.")
+    print(f"Found {len(label_files)} label files.")
 
     count_saved = 0
     all_snrs = []
@@ -99,7 +99,7 @@ def main():
             end_sample = int(offset * sr)
             segment_audio = y[start_sample:end_sample]
 
-            if len(segment_audio) < 40:  # kleiner als padlen
+            if len(segment_audio) < 40:
                 continue
 
             snr_db = compute_snr_new(segment_audio, sr, cutoff=args.cutoff, signal_high=1000)
@@ -141,10 +141,9 @@ def main():
 
                 count_saved += 1
 
-    print(f"\n✅ Done! Saved {count_saved} high-SNR segments (> {args.snr_threshold} dB) in:")
-    print(f"📁 {save_dir}")
+    print(f"\nDone. Saved {count_saved} high-SNR segments (> {args.snr_threshold} dB) in: {save_dir}")
 
-    # === Optional Histogram Plot ===
+    # Optional histogram plot
     if not args.no_plot and len(all_snrs) > 0:
         plt.figure(figsize=(8, 5))
         plt.hist(all_snrs, bins=40, color="skyblue", edgecolor="black", alpha=0.8)
@@ -160,9 +159,9 @@ def main():
         plt.savefig(hist_path, dpi=150)
         plt.close()
 
-        print(f"📊 Histogram saved under: {hist_path}")
+        print(f"Histogram saved to: {hist_path}")
     elif len(all_snrs) == 0:
-        print("⚠️ No valid SNR values found — no histogram created.")
+        print("No valid SNR values found; no histogram created.")
 
 
 if __name__ == "__main__":

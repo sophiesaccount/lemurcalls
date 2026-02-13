@@ -3,16 +3,28 @@ import torch.nn as nn
 
 KERNEL_SIZE = 3
 
-# 1. Load Whisper Encoder
+
 class WhisperEncoder(nn.Module):
+    """Wraps a Whisper encoder for use in WhisperFormer."""
+
     def __init__(self, encoder):
         super().__init__()
         self.encoder = encoder
 
     def forward(self, x):
+        """Forward pass through the encoder.
+
+        Args:
+            x: Input features (e.g. mel spectrogram).
+
+        Returns:
+            Encoder output (e.g. last_hidden_state).
+        """
         return self.encoder(x)
 
 class LightDecoderLayer(nn.Module):
+    """Single transformer decoder layer with self-attention and feed-forward block."""
+
     def __init__(self, d_model, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
 
@@ -39,22 +51,23 @@ class LightDecoderLayer(nn.Module):
         )
 
     def forward(self, x):
-        # Self-Attention Block
-        attn_out, _ = self.self_attn(x, x, x) 
+        """Forward pass: self-attention then feed-forward with residual connections."""
+        attn_out, _ = self.self_attn(x, x, x)
         attn_out = self.dropout_attn(attn_out)
-        x = x + attn_out                      # Skip-Connection
-        x = self.norm1(x)                     # LayerNorm danach
+        x = x + attn_out
+        x = self.norm1(x)
 
-        # Feed-Forward Block
         ff_out = self.ff(x)
         ff_out = self.dropout_ff(ff_out)
-        x = x + ff_out                        # wieder Skip-Connection
+        x = x + ff_out
         x = self.norm2(x)
 
         return x
 
 
 class LightDecoder(nn.Module):
+    """Stack of LightDecoderLayer with final LayerNorm."""
+
     def __init__(self, d_model, num_layers=3, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
 
@@ -71,10 +84,9 @@ class LightDecoder(nn.Module):
         return self.norm(x)
 
 
-
-
-# 2. Classification Head (similar to ActionFormer) 
 class ClassificationHead(nn.Module):
+    """1D convolutional head for per-frame class logits (similar to ActionFormer)."""
+
     def __init__(self, input_dim, num_classes, num_layers=2, dropout=0.1):
         super().__init__()
 
@@ -87,15 +99,17 @@ class ClassificationHead(nn.Module):
         self.layers = nn.Sequential(*layers)
         self.output_conv = nn.Conv1d(input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1)
 
-    def forward(self, x):  # (B, T, D)
-        x = x.transpose(1, 2)      # → (B, D, T)
-        x = self.layers(x)         # alle Conv-Blöcke
-        x = self.output_conv(x)    # → (B, num_classes, T)
-        return x.transpose(1, 2)   # → (B, T, C)
+    def forward(self, x):
+        """Forward pass. Input (B, T, D) -> output (B, T, num_classes)."""
+        x = x.transpose(1, 2)
+        x = self.layers(x)
+        x = self.output_conv(x)
+        return x.transpose(1, 2)
 
 
-# 3. Regression Head (similar to ActionFormer)
 class RegressionHead(nn.Module):
+    """1D convolutional head for per-frame start/end offsets (similar to ActionFormer)."""
+
     def __init__(self, input_dim, num_layers=2, dropout=0.1):
         super().__init__()
 
@@ -108,15 +122,18 @@ class RegressionHead(nn.Module):
         self.layers = nn.Sequential(*layers)
         self.output_conv = nn.Conv1d(input_dim, 2, kernel_size=KERNEL_SIZE, padding=1)
 
-    def forward(self, x):  # (B, T, D)
-        x = x.transpose(1, 2)       # (B, D, T)
+    def forward(self, x):
+        """Forward pass. Input (B, T, D) -> output (B, T, 2) non-negative offsets."""
+        x = x.transpose(1, 2)
         x = self.layers(x)
         x = self.output_conv(x)
         x = torch.relu(x)
-        return x.transpose(1, 2)    # (B, T, 2)
+        return x.transpose(1, 2)
 
 
 class WhisperFormer(nn.Module):
+    """Whisper encoder + light decoder + classification and regression heads for event detection."""
+
     def __init__(
         self,
         encoder,
@@ -128,7 +145,7 @@ class WhisperFormer(nn.Module):
         super().__init__()
 
         self.encoder = WhisperEncoder(encoder)
-        d_model = encoder.config.d_model   # 🔥 EINZIGE Quelle der Wahrheit
+        d_model = encoder.config.d_model
 
         self.decoder = LightDecoder(
             d_model=d_model,
@@ -150,8 +167,9 @@ class WhisperFormer(nn.Module):
         )
 
     def forward(self, input_features):
+        """Forward pass. Returns class logits and regression offsets per frame."""
         encoder_outputs = self.encoder(input_features)
-        hidden_states = encoder_outputs.last_hidden_state  # (B, T/2, D)
+        hidden_states = encoder_outputs.last_hidden_state
 
         decoder_outputs = self.decoder(hidden_states)
 

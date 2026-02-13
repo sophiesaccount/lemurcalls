@@ -5,6 +5,8 @@ import librosa
 
 
 class WhisperFormerDatasetQuality(Dataset):
+    """Dataset that yields Whisper input features and quality-weighted frame labels for WhisperFormer."""
+
     def __init__(self, audio_list, label_list, total_spec_columns, feature_extractor, num_classes, low_quality_value, value_q2, centerframe_size):
         self.audio_list = audio_list
         self.label_list = label_list
@@ -20,23 +22,22 @@ class WhisperFormerDatasetQuality(Dataset):
         return len(self.audio_list)
 
     def __getitem__(self, idx):
+        """Returns a single sample: input_features, frame labels (clusters), segments, raw_labels."""
         audio = self.audio_list[idx]
         label = self.label_list[idx]
 
-
-        # 1) In 1D np.float32 umwandeln
+        # Convert to 1D np.float32
         if isinstance(audio, torch.Tensor):
             audio = audio.detach().cpu().numpy()
         audio = np.asarray(audio).astype(np.float32).reshape(-1)
 
-        # 2) Resampling auf 16 kHz (falls nötig)
+        # Resample to 16 kHz if needed
         target_sr = 16000
         orig_sr = int(label.get("sr", target_sr))
         if orig_sr != target_sr:
-            # librosa erwartet float32 [-1,1]
             audio = librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
 
-        # 3) Feste Clip-Länge in Samples (z. B. 3000 Frames * 10 ms * 16000 Hz = 480000)
+        # Fixed clip length in samples (e.g. 3000 frames * 10 ms * 16000 Hz = 480000)
         spec_time_step = 0.01  # 10 ms
         num_samples_in_clip = int(round(self.total_spec_columns * spec_time_step * target_sr))
 
@@ -44,7 +45,7 @@ class WhisperFormerDatasetQuality(Dataset):
         audio = audio[clip_start : clip_start + num_samples_in_clip]
 
 
-        # 4) Pad oder kürzen auf exakt num_samples_in_clip
+        # Pad or truncate to exactly num_samples_in_clip
         if len(audio) < num_samples_in_clip:
             pad_len = num_samples_in_clip - len(audio)
             audio = np.pad(audio, (0, pad_len), mode="constant")
@@ -52,7 +53,7 @@ class WhisperFormerDatasetQuality(Dataset):
             audio = audio[:num_samples_in_clip]
 
 
-        # 5) Whisper-Features mit fixer Frame-Länge erzeugen
+        # Compute Whisper features with fixed frame length
         input_features = self.feature_extractor(
             audio,
             sampling_rate=target_sr,
@@ -62,7 +63,7 @@ class WhisperFormerDatasetQuality(Dataset):
             max_length=num_samples_in_clip, 
         ).input_features  
 
-        input_features = input_features.squeeze(0) # -> (80, 3000)
+        input_features = input_features.squeeze(0)
 
         sr = 16000
         spec_time_step = 0.01
@@ -74,7 +75,7 @@ class WhisperFormerDatasetQuality(Dataset):
         end_time = start_time + actual_clip_duration
       
  
-        #label finden die mit clip überschneiden
+        # Find labels that overlap with this clip
         intersected_indices = np.logical_and(label["onset"] < end_time, label["offset"] > start_time) 
 
         onset_in_clip = np.maximum(label["onset"][intersected_indices], start_time) 
@@ -90,13 +91,12 @@ class WhisperFormerDatasetQuality(Dataset):
         sequence_length = self.total_spec_columns #3000
         reduced_sequence_length = sequence_length // 2 #1500
 
-        reduced_spec_time_step = spec_time_step * 2  #0.02
+        reduced_spec_time_step = spec_time_step * 2
 
-        # Frame-basierte Label-Matrix (mit Gaussians)
-        frame_labels = np.zeros((reduced_sequence_length, self.num_classes), dtype=np.float32) #(1500, C)
+        # Frame-based label matrix (with Gaussians)
+        frame_labels = np.zeros((reduced_sequence_length, self.num_classes), dtype=np.float32)
 
-        # Segments
-        segments = np.zeros((reduced_sequence_length, 2), dtype=np.float32) #(1500, 2)
+        segments = np.zeros((reduced_sequence_length, 2), dtype=np.float32)
 
         offset_mask_size = 2
         offset_mask = np.zeros(reduced_sequence_length, dtype=bool)
@@ -106,24 +106,16 @@ class WhisperFormerDatasetQuality(Dataset):
                 continue
             
 
-            # Sekunden -> Spektrogramm-Frames
+            # Seconds -> spectrogram frame indices
             onset_col = int(np.floor(onset / reduced_spec_time_step))
             offset_col = min(int(np.ceil(offset / reduced_spec_time_step)), reduced_sequence_length-1)
 
-
-            # Mittelpunkt als ganzzahliger Frame
             center_frame = (onset_col + offset_col) // 2
             frame_len = offset_col-onset_col
 
             offset_mask[center_frame - int(self.centerframe_size*(frame_len/2)) : center_frame + int(self.centerframe_size*(frame_len/2))] = True
             offset_mask = offset_mask.reshape(-1,1)
 
-            # Reduzierte Frames
-            #onset_red = onset_col // 2
-            #offset_red = offset_col // 2
-            #center_red = center_frame // 2
-
-            # Frames only inside the Labels
             label_frames = np.arange(onset_col, offset_col+1)
             sigma = max(offset_col - onset_col, 1e-6)
 
@@ -134,26 +126,24 @@ class WhisperFormerDatasetQuality(Dataset):
                 frame_update[label_frames] = 1
             elif str(quality) == "2":
                 frame_update[label_frames] = self.value_q2
-            else: 
+            else:
                 frame_update[label_frames] = self.low_quality_value
-            # Frame-Labels aktualisieren
             frame_labels[:, cluster_id] = np.maximum(
                 frame_labels[:, cluster_id], frame_update
             )
 
             frame_labels= frame_labels * offset_mask
 
-            # Segments für diese Klasse eintragen
             for t in label_frames:
-                segments[t, 0] = t - onset_col     # Abstand zum Onset
-                segments[t, 1] = offset_col - t    # Abstand zum Offset
+                segments[t, 0] = t - onset_col
+                segments[t, 1] = offset_col - t
 
             #segments= segments * offset_mask
 
         output = {
-            "input_features": input_features,   # (B, F, T)
-            "clusters": torch.tensor(frame_labels, dtype=torch.float32),          # (B, T/2, C)
-            "segments": torch.tensor(segments, dtype=torch.float32),              # (B, T/2, 2)
+            "input_features": input_features,
+            "clusters": torch.tensor(frame_labels, dtype=torch.float32),
+            "segments": torch.tensor(segments, dtype=torch.float32),
             "raw_labels": label
         }
 

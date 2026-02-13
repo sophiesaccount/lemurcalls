@@ -45,8 +45,7 @@ def sum_dicts(dicts: list, classes: dict) -> defaultdict:
         classes (dict): Dictionary containing the valid annotation labels
 
     Returns:
-        defaultdict: Dictionary containing the sum of all annotations per label
-        total1 (int): Total number of annotations
+        Tuple (defaultdict of annotation counts, int total number of annotations).
     """
     d = defaultdict(int)
     total1 = total2 = 0
@@ -99,7 +98,7 @@ def annotation_statistics(path: str, config_path: str, mode: str):
         # [ cl,   m,   l,  ca, sh,  b, pc, p1, cm,       +           h,  pu,  mo,  w, p2, +        t, sq,  y, hu, + ],
         # cut: P1: ht, o, ud, n, e, c; P2: hw, d, up; P3: p3, se, sk, wa, ho
         print(f"{d['cl']}, {d['m']}, {d['l']}, {d['ca']}, {d['sh']}, {d['b']}, {d['pc']}, {d['p1']}, {d['cm']}, {d['ht']+d['o']+d['ud']+d['n']+d['e']+d['c']}, {d['h']}, {d['pu']}, {d['mo']}, {d['w']}, {d['p2']}, {d['hw']+d['d']+d['up']}, {d['t']}, {d['sq']}, {d['y']}, {d['hu']}, {d['p3']+d['se']+d['sk']+d['wa']+d['ho']}")
-        print('Total annotatios: ', d['cl'] + d['m'] + d['l'] + d['ca'] + d['sh'] + d['b'] + d['pc'] + d['p1'] + d['cm'] + d['ht']+d['o']+d['ud']+d['n']+d['e']+d['c'] + d['h'] + d['pu'] + d['mo'] + d['w'] + d['p2'] + d['hw']+d['d']+d['up'] + d['t'] + d['sq'] + d['y'] + d['hu'] + d['p3']+d['se']+d['sk']+d['wa']+d['ho'])
+        print('Total annotations: ', d['cl'] + d['m'] + d['l'] + d['ca'] + d['sh'] + d['b'] + d['pc'] + d['p1'] + d['cm'] + d['ht']+d['o']+d['ud']+d['n']+d['e']+d['c'] + d['h'] + d['pu'] + d['mo'] + d['w'] + d['p2'] + d['hw']+d['d']+d['up'] + d['t'] + d['sq'] + d['y'] + d['hu'] + d['p3']+d['se']+d['sk']+d['wa']+d['ho'])
     else:
         logging.warning(f"Unknown mode: {mode}")
 

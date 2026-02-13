@@ -25,7 +25,7 @@ def download_model( model_path, ignore_cache = False ):
     ## This model path is a local folder path
     if os.path.exists( model_path ):
         return model_path
-    ## Suppose that this model path is a model name stored at huggingface 
+    # Suppose that this model path is a model name stored at Hugging Face
     cache_dir = os.path.expanduser(os.getenv("WHISPERSEG_MODEL_CACHE", "~/.cache/whisperseg_models/"))
 
     os.makedirs(cache_dir, exist_ok=True )
@@ -43,7 +43,16 @@ def download_model( model_path, ignore_cache = False ):
     return local_model_path
 
 
-def save_model( model, tokenizer, current_step, model_folder, max_to_keep ):
+def save_model(model, tokenizer, current_step, model_folder, max_to_keep):
+    """Save checkpoint and tokenizer; optionally prune old checkpoints.
+
+    Args:
+        model: Model to save (may be wrapped in DataParallel).
+        tokenizer: Tokenizer to save.
+        current_step: Step index for checkpoint name.
+        model_folder: Directory to write to.
+        max_to_keep: Max checkpoints to keep (<=0 to keep all).
+    """
     try:
         model = model.module
     except:
@@ -60,8 +69,17 @@ def save_model( model, tokenizer, current_step, model_folder, max_to_keep ):
         ckpt_name = ckpt_list[0]
         os.system("rm -r %s"%(ckpt_name) )
         
-def load_model( initial_model_path, total_spec_columns, dropout = 0.0):
+def load_model(initial_model_path, total_spec_columns, dropout=0.0):
+    """Load WhisperForConditionalGeneration and tokenizer; set spec columns and dropout.
 
+    Args:
+        initial_model_path: Path to pretrained model.
+        total_spec_columns: Max source positions / spec columns.
+        dropout: Dropout value for encoder and decoder.
+
+    Returns:
+        tuple: (model, tokenizer).
+    """
     model = WhisperForConditionalGeneration.from_pretrained(initial_model_path)
     model.config.max_source_positions = int( 0.5*total_spec_columns )
     with torch.no_grad():
@@ -90,12 +108,12 @@ def load_model( initial_model_path, total_spec_columns, dropout = 0.0):
             "marmoset":"<|marmoset|>",
             "human":"<|human|>",
             "catta_lemur":"<|catta_lemur|>",
-            ## set unknown for other species
+            # Set unknown for other species
             "unknown":"<|unknown|>",
             "animal":"<|animal|>"
         }
 
-    ## do not change nccratliri/whisper-large to openai/whisper-large, since the tokenizer in openai/whisper-large has changed its vocabulary
+    # Do not change nccratliri/whisper-large to openai/whisper-large; tokenizer vocabulary differs
     tokenizer = WhisperTokenizer.from_pretrained("nccratliri/whisper-large", language = "english" )
     tokenizer.add_tokens( ["<|%d|>"%(i) for i in range( total_spec_columns + 1)], special_tokens=True  )
     tokenizer.add_tokens( [ v for k, v in model.config.species_codebook.items() ], special_tokens=True )
@@ -104,14 +122,16 @@ def load_model( initial_model_path, total_spec_columns, dropout = 0.0):
 
         
 class SegmenterBase:
-    def __init__( self,  ):
+    """Base class for Whisper-based vocal segmenters: slicing, generation, parsing, scoring."""
+
+    def __init__(self):
         self.segment_matcher = re.compile("<\|([0-9]+)\|>(\d+?)<\|([0-9]+)\|>")
         self.total_spec_columns = None
         self.precision_bits = 3
         self.cluster_codebook = None
 
-    ### segmentation-related functions:
-    def get_sliced_audios_features( self,  audio, sr, min_frequency, spec_time_step, num_trials):
+    # Segmentation-related functions
+    def get_sliced_audios_features(self, audio, sr, min_frequency, spec_time_step, num_trials):
         feature_extractor = WhisperSegFeatureExtractor( sr, spec_time_step, min_frequency = min_frequency )
         clip_duration = self.total_spec_columns * spec_time_step
         
@@ -129,7 +149,7 @@ class SegmenterBase:
                                            ], axis = 0 
                                          )
             
-            ## This loop must be executed once even for zero length audio
+            # This loop must be executed once even for zero length audio
             for pos in range( 0, max(len(audio_padded), 1), audio_clip_length ):
                 offset_time = pos / sr - padding_time
                 
@@ -152,8 +172,8 @@ class SegmenterBase:
                 sliced_audios_features.append( ( trial_id, offset_time, input_features, len(audio_clip)/sr ) )
         return sliced_audios_features
         
-    ## This is used for WhisperSegmenter and WhisperSegmenterFast, not for WhisperSegmenterForEval
-    def generate_segment_text( self, sliced_audios_features, batch_size, max_length, num_beams, top_k = 1, top_p = 1.0, length_penalty = 1.0, status_monitor = None ):
+    # Used for WhisperSegmenter and WhisperSegmenterFast, not for WhisperSegmenterForEval
+    def generate_segment_text(self, sliced_audios_features, batch_size, max_length, num_beams, top_k=1, top_p=1.0, length_penalty=1.0, status_monitor=None):
         generated_texts_dict = {}
         all_threads = []
         num_examples_per_thread = int(np.ceil( len( sliced_audios_features ) / len( self.device_list ) ))
@@ -162,7 +182,7 @@ class SegmenterBase:
                                   args = ( sliced_audios_features[pos:pos+num_examples_per_thread],
                                            batch_size, max_length, num_beams, top_k, top_p, 
                                            length_penalty, generated_texts_dict, thread_id,
-                                           status_monitor if thread_id == 0 else None   ## pass the status_monitor only to the first thread
+                                           status_monitor if thread_id == 0 else None   # Pass status_monitor only to the first thread
                                          )
                                 )
             t.start()
@@ -175,7 +195,8 @@ class SegmenterBase:
             generated_text_list += generated_texts_dict[thread_id]
         return generated_text_list  
     
-    def extract_segments( self, text, spec_time_step ):
+    def extract_segments(self, text, spec_time_step):
+        """Parse generated text into (onset, offset, cluster) segments."""
         inverse_cluster_codebook = { v:k for k,v in self.cluster_codebook.items()}   
         segment_list = []
         match_res_list = self.segment_matcher.findall( text )
@@ -203,7 +224,7 @@ class SegmenterBase:
                          consolidation_method
                         ):
         
-        ## convert generated text to on_offsets
+        # Convert generated text to on_offsets
         on_offset_list_of_trial = {}
         for count, generated_text in enumerate(generated_text_list):
             trial_id, offset_time, _, duration = sliced_audios_features[count]
@@ -218,7 +239,7 @@ class SegmenterBase:
 
             on_offset_list_of_trial[trial_id].append( on_offsets_clip )
             
-        ## merge (or concatenate) the on_offset of each trial separately
+        # Merge (or concatenate) the on_offset of each trial separately
         merged_on_offset_list_of_trial = {}
         for trial_id in on_offset_list_of_trial:
             merged_on_offset_list_of_trial[trial_id] = []
@@ -228,8 +249,7 @@ class SegmenterBase:
                    len(on_offsets_clip)>0 and \
                    merged_on_offset_list_of_trial[trial_id][-1][1] == on_offsets_clip[0][0] and \
                    merged_on_offset_list_of_trial[trial_id][-1][2] == on_offsets_clip[0][2]:  
-                    ## previous offset == current onset and the cluster type is the same, then we merge them
-                    
+                    # Previous offset == current onset and same cluster: merge them
                     merged_on_offset_list_of_trial[trial_id][-1][1] = on_offsets_clip[0][1]
                     on_offsets_clip = on_offsets_clip[1:]
                 merged_on_offset_list_of_trial[trial_id] += on_offsets_clip
@@ -261,14 +281,14 @@ class SegmenterBase:
             else:
                 final_prediction = self.consolidate_trials_by_voting( trials_results, time_per_frame_for_voting)
             
-        ##formating the final prediction
+        # Format the final prediction
         final_prediction["onset"] = [ float(np.round(t, self.precision_bits)) for t in final_prediction["onset"] ]
         final_prediction["offset"] = [ float(np.round(t, self.precision_bits)) for t in final_prediction["offset"] ]
         
         return final_prediction
 
 
-    ### multi-trial consolidation 
+    # Multi-trial consolidation
     def custom_distance(self, segment1, segment2):
         onset_diff = abs(segment1[0] - segment2[0])
         offset_diff = abs(segment1[1] - segment2[1])
@@ -306,7 +326,7 @@ class SegmenterBase:
                 cluster_name_dict = {}
                 for seg in group_segments:
                     cluster_name_dict[ seg["cluster"] ] = cluster_name_dict.get( seg["cluster"], 0 ) + 1
-                ## get the most common cluster name
+                # Get the most common cluster name
                 cluster_name = sorted(list(cluster_name_dict.items()), key = lambda x:-x[1])[0][0]
                 
                 avg_onset = np.mean([seg['onset'] for seg in group_segments])
@@ -421,8 +441,8 @@ class SegmenterBase:
         return final_prediction
             
 
-    ### evaluation-related functions
-    def compute_syllable_score( self, prediction_on_offset_list, label_on_offset_list, tolerance = 0.02  ):
+    # Evaluation-related functions
+    def compute_syllable_score(self, prediction_on_offset_list, label_on_offset_list, tolerance=0.02):
         
         n_positive_in_prediction = len(prediction_on_offset_list)
         n_positive_in_label = len(label_on_offset_list)
@@ -435,9 +455,9 @@ class SegmenterBase:
                     # print( (pred_onset, pred_offset), (label_onset, label_offset) )
                     n_true_positive += 1
                     is_matched = True
-                    break  # early stop for the predicted value
+                    break  # Early stop for the predicted value
             if is_matched:
-                ## remove the already matched syllable from the ground-truth
+                # Remove the already matched syllable from the ground-truth
                 label_on_offset_list.pop(count)
         
         return n_true_positive, n_positive_in_prediction, n_positive_in_label
@@ -516,8 +536,10 @@ class SegmenterBase:
         return TP, P_in_pred, P_in_label, precision, recall, f1
     
     
-class WhisperSegmenterForEval(SegmenterBase):        
-    def __init__(self, model_path = None, device = None, model = None, tokenizer = None):
+class WhisperSegmenterForEval(SegmenterBase):
+    """Segmenter that uses Hugging Face WhisperForConditionalGeneration (e.g. for evaluation)."""
+
+    def __init__(self, model_path=None, device=None, model=None, tokenizer=None):
         super().__init__()
         if model_path is not None:
             self.model = WhisperForConditionalGeneration.from_pretrained( model_path )
@@ -566,8 +588,10 @@ class WhisperSegmenterForEval(SegmenterBase):
         return generated_text_list
     
     
-class WhisperSegmenter(SegmenterBase):        
-    def __init__(self, model_path, device = None, device_ids = [ 0,] ):
+class WhisperSegmenter(SegmenterBase):
+    """Multi-GPU segmenter using Hugging Face Whisper (PyTorch)."""
+
+    def __init__(self, model_path, device=None, device_ids=[0]):
         super().__init__()
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -608,16 +632,18 @@ class WhisperSegmenter(SegmenterBase):
             generated_text_batch = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
             generated_text_list += generated_text_batch
             
-            ### if status_monitor is not None, update the progress in percentage
-            ### status_monitor is a dictionary which contains the key "progress" 
+            # If status_monitor is not None, update progress in percentage (key "progress")
             if status_monitor is not None:
                 progress_percent =  int( 100 * min( 1, (pos+batch_size) / len(sliced_audios_features) ) )
                 status_monitor["progress"] = progress_percent
             
         generated_texts_dict[thread_id] = generated_text_list
-    
+
+
 class WhisperSegmenterFast(SegmenterBase):
-    def __init__(self, model_path, device=None, device_ids = [ 0,] ):
+    """Segmenter using CTranslate2 Whisper for fast inference."""
+
+    def __init__(self, model_path, device=None, device_ids=[0]):
         super().__init__()
         
         if device is None:
@@ -647,17 +673,14 @@ class WhisperSegmenterFast(SegmenterBase):
         generated_text_list = []
         for pos in range( 0, len(sliced_audios_features), batch_size ):
             
-            """ 
-            This is the code if model is the converted ctranslate model
-            """
+            # Code path for converted CTranslate2 model
             sliced_audios_features_batch = sliced_audios_features[pos:pos+batch_size]
             actual_batch_size = len(sliced_audios_features_batch)
             features = ctranslate2.StorageView.from_array(np.asarray([ item[2] for item in sliced_audios_features_batch ]))
             prompt = tokenizer.convert_tokens_to_ids(
                 [ "<|startoftranscript|>", "<|en|>", "<|notimestamps|>"]
             )
-            ## the ctranslate converted model typically requires a larger max length than the one required by the original huggingface model, so we set max_length to a large value.
-            ## Note Ctranslate Whisper does not support top_p sampling
+            # CTranslate2 model may require larger max_length than Hugging Face. Note: no top_p sampling.
             model_output = model.generate(features, [ prompt for _ in range(actual_batch_size) ], 
                                                  max_length = max_length, beam_size = num_beams,
                                                  sampling_topk = top_k,
@@ -674,12 +697,10 @@ class WhisperSegmenterFast(SegmenterBase):
             generated_text_list += generated_text_batch
             
             
-            ### if status_monitor is not None, update the progress in percentage
-            ### status_monitor is a dictionary which contains the key "progress" 
+            # If status_monitor is not None, update progress in percentage (key "progress")
             if status_monitor is not None:
                 progress_percent =  int( 100 * min( 1, (pos+batch_size) / len(sliced_audios_features) ) )
                 status_monitor["progress"] = progress_percent
-            
         
         generated_texts_dict[thread_id] = generated_text_list
     

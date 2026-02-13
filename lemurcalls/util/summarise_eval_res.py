@@ -40,7 +40,7 @@ if __name__ == "__main__":
         # eval filename syntax: <date>_<time>_eval_<base/large>_j<job_id>.txt
         job_id = file.name.split('j')[1][:-4]
         if args.from_id <= job_id <= args.to_id:
-            out.append(summarise_res(file=file))
+            out.append(summarise_res(file=file, job_id=job_id))
         else:
             continue
 

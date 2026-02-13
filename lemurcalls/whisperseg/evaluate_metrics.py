@@ -3,11 +3,15 @@ import argparse
 import numpy as np
 
 def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.0001):
-    """
-    Berechnet TP, FP, FN, FC und F1 für gegebene Labels und Predictions.
-    labels, predictions: Dicts mit keys 'onset', 'offset', 'cluster' (Listen)
-    overlap_tolerance: Mindestüberlappung (0...1), damit ein Match zählt
-    Rückgabe: dict mit keys 'tp', 'fp', 'fn', 'fc', 'f1', 'precision', 'recall'
+    """Compute TP, FP, FN, FC and F1 for given labels and predictions.
+
+    Args:
+        labels: Dict with keys 'onset', 'offset', 'cluster' (lists).
+        predictions: Dict with keys 'onset', 'offset', 'cluster' (lists).
+        overlap_tolerance: Minimum overlap ratio (0..1) for a match to count. Default 0.0001.
+
+    Returns:
+        dict: Keys 'tp', 'fp', 'fn', 'fc', 'f1', 'precision', 'recall'.
     """
     label_onsets = np.array(labels['onset'])
     label_offsets = np.array(labels['offset'])
@@ -21,12 +25,12 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
     matched_preds = set()
     false_class = 0
 
-    # True Positives & False Class: Prediction und Label überlappen ausreichend
+    # True Positives and False Class: prediction and label overlap sufficiently
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
         for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
             if l_idx in matched_labels or p_idx in matched_preds:
                 continue
-            # Überlappung berechnen
+            # Compute overlap
             intersection = max(0, min(pf, lf) - max(po, lo))
             union = max(pf, lf) - min(po, lo)
             overlap_ratio = intersection / union if union > 0 else 0
@@ -59,10 +63,10 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
     }
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Berechne Detection-Metriken für Labels und Predictions.")
-    parser.add_argument('--labels', required=True, help='Pfad zur Labels-JSON')
-    parser.add_argument('--predictions', required=True, help='Pfad zur Predictions-JSON')
-    parser.add_argument('--overlap_tolerance', type=float, default=0.0001, help='Mindestüberlappung für Match (default: 0.2)')
+    parser = argparse.ArgumentParser(description="Compute detection metrics for labels and predictions.")
+    parser.add_argument('--labels', required=True, help='Path to labels JSON file')
+    parser.add_argument('--predictions', required=True, help='Path to predictions JSON file')
+    parser.add_argument('--overlap_tolerance', type=float, default=0.0001, help='Minimum overlap for a match (default: 0.0001)')
     args = parser.parse_args()
 
     with open(args.labels, 'r') as f:

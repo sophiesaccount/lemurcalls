@@ -4,12 +4,11 @@ import numpy as np
 import os
 import argparse
 
-# === Argumente parsen ===
-parser = argparse.ArgumentParser(description="Filtere Labels nach Amplituden-Threshold.")
-parser.add_argument("--wav_path", required=True, help="Pfad zur WAV-Datei")
-parser.add_argument("--labels_path", required=True, help="Pfad zur Labels-JSON")
-parser.add_argument("--output_path", required=True, help="Pfad zur Ausgabe-JSON")
-parser.add_argument("--amplitude_threshold", type=float, required=True, help="Amplitude-Threshold (z.B. 0.05)")
+parser = argparse.ArgumentParser(description="Filter labels by amplitude threshold.")
+parser.add_argument("--wav_path", required=True, help="Path to WAV file")
+parser.add_argument("--labels_path", required=True, help="Path to labels JSON")
+parser.add_argument("--output_path", required=True, help="Path to output JSON")
+parser.add_argument("--amplitude_threshold", type=float, required=True, help="Amplitude threshold (e.g. 0.05)")
 args = parser.parse_args()
 
 wav_path = args.wav_path
@@ -17,7 +16,6 @@ labels_path = args.labels_path
 output_path = args.output_path
 amplitude_threshold = args.amplitude_threshold
 
-# === Audio und Labels laden ===
 audio, sr = librosa.load(wav_path, sr=None)
 with open(labels_path, "r") as f:
     labels = json.load(f)
@@ -26,7 +24,6 @@ onsets = np.array(labels["onset"])
 offsets = np.array(labels["offset"])
 clusters = labels["cluster"]
 
-# === Filtere Labels nach Amplitude ===
 filtered_onsets = []
 filtered_offsets = []
 filtered_clusters = []
