@@ -191,7 +191,7 @@ def infer_architecture_from_state_dict(state_dict):
         Tuple (num_decoder_layers, num_head_layers, num_classes).
     """
     decoder_indices = set()
-    head_indices = set()
+    head_conv_indices = set()
     num_classes = None
 
     for key in state_dict.keys():
@@ -199,17 +199,18 @@ def infer_architecture_from_state_dict(state_dict):
         if key.startswith("decoder.layers."):
             idx = int(key.split(".")[2])
             decoder_indices.add(idx)
-        # Keys like "class_head.layers.0.weight" (Conv1d, ReLU, Dropout per layer)
-        if key.startswith("class_head.layers."):
+        # Keys like "class_head.layers.0.weight" -- only Conv1d layers have
+        # parameters (ReLU and Dropout do not), so each unique index here
+        # corresponds to one head layer.
+        if key.startswith("class_head.layers.") and key.endswith(".weight"):
             idx = int(key.split(".")[2])
-            head_indices.add(idx)
+            head_conv_indices.add(idx)
         # "class_head.output_conv.weight" has shape (num_classes, d_model, kernel)
         if key == "class_head.output_conv.weight":
             num_classes = state_dict[key].shape[0]
 
     num_decoder_layers = len(decoder_indices)
-    # ClassificationHead creates 3 nn.Modules per layer (Conv1d, ReLU, Dropout)
-    num_head_layers = len(head_indices) // 3 if head_indices else 0
+    num_head_layers = len(head_conv_indices)
 
     return num_decoder_layers, num_head_layers, num_classes
 
