@@ -21,16 +21,14 @@ def get_flex_file_iterator(file_path: str, rglob_str: str = "*.txt") -> Generato
     If the provided path does not exist: Return None.
 
     Args:
-        file_path (str): Path to the directory to search
-        rglob_str (str, optional): . Defaults to "*.txt".
+        file_path: Path to the directory or file to search.
+        rglob_str: Glob pattern for recursive search. Defaults to "*.txt".
 
     Raises:
         ValueError: If the file path is invalid
 
     Returns:
-        Generator[Path, None, None]: If the provided path is a directory, return a generator to traverse it
-        List[str]: If the provided path is a file, return a list containing the file path
-        None: If the provided path is does not exist, return None
+        Generator[Path, None, None] if path is a directory; list of one Path if path is a file; None if path does not exist.
     """
     if not (p := Path(file_path)).exists:
         return None

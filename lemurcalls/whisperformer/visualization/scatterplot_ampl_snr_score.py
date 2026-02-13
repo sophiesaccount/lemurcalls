@@ -42,9 +42,7 @@ ID_TO_CLUSTER = {
 }
 
 def highpass_filter(y, sr, cutoff=200, order=5):
-    """
-    Wendet einen Butterworth-Highpass-Filter an, um tiefe Frequenzen unterhalb von 'cutoff' Hz zu entfernen.
-    """
+    """Apply Butterworth highpass filter to remove frequencies below cutoff Hz."""
     nyquist = 0.5 * sr
     normal_cutoff = cutoff / nyquist
     b, a = butter(order, normal_cutoff, btype='high', analog=False)
@@ -52,20 +50,12 @@ def highpass_filter(y, sr, cutoff=200, order=5):
     return y_filtered
 
 def compute_snr(y, sr, cutoff=200, order=5):
-    """
-    Berechnet eine einfache Signal-to-Noise-Ratio (SNR) in dB.
-    'Signal' = Energie oberhalb cutoff Hz
-    'Noise'  = Energie unterhalb cutoff Hz
-    """
-    # Highpass -> Signalanteil über cutoff
+    """Compute simple SNR in dB: signal = energy above cutoff Hz, noise = energy below cutoff."""
     y_signal = highpass_filter(y, sr, cutoff=cutoff, order=order)
-    # Lowpass -> Restenergie unter cutoff
     nyquist = 0.5 * sr
     normal_cutoff = cutoff / nyquist
     b, a = butter(order, normal_cutoff, btype='low', analog=False)
     y_noise = filtfilt(b, a, y)
-
-    # Energie (mittlere Leistung)
     signal_power = np.mean(y_signal ** 2) + 1e-10
     noise_power = np.mean(y_noise ** 2) + 1e-10
 
@@ -74,46 +64,25 @@ def compute_snr(y, sr, cutoff=200, order=5):
 
 
 def compute_snr_timebased(y, sr, start_sample, end_sample):
-    """
-    Berechnet SNR in dB anhand eines Audiosegments und der direkt folgenden "Noise"-Region.
-    
-    Args:
-        y: Audio-Signal (1D numpy array)
-        sr: Samplingrate
-        start_sample: Start des Signal-Segments
-        end_sample: Ende des Signal-Segments
-    
-    Returns:
-        snr_db: SNR in dB
-    """
-    # Signalsegment
-    y_signal = y[start_sample:end_sample]
+    """Compute SNR in dB from a signal segment and the immediately following noise region.
 
-    # Noise-Segment direkt danach (gleich lang)
+    Args:
+        y: Audio signal (1D numpy array).
+        sr: Sample rate.
+        start_sample: Start of signal segment.
+        end_sample: End of signal segment.
+
+    Returns:
+        SNR in dB.
+    """
+    y_signal = y[start_sample:end_sample]
     noise_start = end_sample
     noise_end = end_sample + (end_sample - start_sample)
     
-    # Prüfen, dass wir nicht über das Audio hinauslaufen
-    #if noise_end > len(y):
-    #    noise_end = len(y)
     y_noise = y[noise_start:noise_end]
-    #print(f'noise_start: {noise_end}')
-    #print(f'noise_end: {noise_end}')
-
-    # Falls kein Noise-Segment verfügbar ist, kleine Zahl hinzufügen, um Division durch 0 zu vermeiden
-    #if len(y_noise) == 0:
-    #if noise_end >=16000:
-    #    y_noise = np.array([1e-10])
-    #    print('No Noise Segment found!')
-
-    # Energie (mittlere Leistung)
     signal_power = np.mean(y_signal ** 2) + 1e-10
     noise_power = np.mean(y_noise ** 2) + 1e-10
-    #print(f'signal_power: {signal_power}')
-    #print(f'noise_power: {signal_power}')
-
     snr_db = 10 * np.log10(signal_power / noise_power)
-    #print(f'snr_db: {snr_db}')
     return snr_db
 
 
@@ -122,26 +91,18 @@ from scipy.signal import butter, filtfilt
 import numpy as np
 
 def compute_snr_top200(y, sr, topband_hz=200, order=5):
-    """
-    Berechnet eine einfache Signal-to-Noise-Ratio (SNR) in dB.
-    'Noise'  = Energie in den obersten `topband_hz` Hz (High-Frequency-Anteil)
-    'Signal' = Restenergie unterhalb Nyquist - topband_hz
-    """
+    """Compute SNR in dB: noise = energy in top topband_hz Hz, signal = rest below Nyquist - topband_hz."""
     nyquist = 0.5 * sr
-    cutoff = nyquist - topband_hz  # Grenze zwischen Signal und Noise
+    cutoff = nyquist - topband_hz
     if cutoff <= 0:
-        raise ValueError("Samplingrate zu niedrig oder topband_hz zu groß!")
+        raise ValueError("Sample rate too low or topband_hz too large.")
 
-    # === Lowpass: Signalanteil unterhalb cutoff ===
     normal_cutoff = cutoff / nyquist
     b_low, a_low = butter(order, normal_cutoff, btype='low', analog=False)
     y_signal = filtfilt(b_low, a_low, y)
 
-    # === Highpass: Noise-Anteil oberhalb cutoff ===
     b_high, a_high = butter(order, normal_cutoff, btype='high', analog=False)
     y_noise = filtfilt(b_high, a_high, y)
-
-    # === Leistung (Energie) ===
     signal_power = np.mean(y_signal ** 2) + 1e-10
     noise_power = np.mean(y_noise ** 2) + 1e-10
 
@@ -151,35 +112,16 @@ def compute_snr_top200(y, sr, topband_hz=200, order=5):
 from scipy.signal import butter, filtfilt
 
 def compute_snr_new(y, sr, cutoff=200, signal_high=1200, order=5):
-    """
-    Berechnet die SNR in dB.
-    Signal = Energie zwischen cutoff und signal_high Hz
-    Noise  = Energie unterhalb cutoff Hz
-    """
+    """Compute SNR in dB: signal = energy between cutoff and signal_high Hz, noise = below cutoff."""
     nyquist = 0.5 * sr
-    
-    # 1️⃣ Noise: Tiefpass unter cutoff
     normal_cutoff = cutoff / nyquist
     b, a = butter(order, normal_cutoff, btype='low')
     y_noise = filtfilt(b, a, y)
-    
-    """
-    # 1️⃣ Noise: Tiefpass unter cutoff
-    low = 100
-    high = cutoff 
-    b, a = butter(order, [low/nyquist, high/nyquist], btype='band')
 
-    y_noise = filtfilt(b, a, y)
-    """
-    
-
-    # 2️⃣ Signal: Bandpass cutoff - signal_high
-    high = min(signal_high, nyquist)  # sicherstellen, dass wir nicht über Nyquist gehen
-    low  = cutoff
+    high = min(signal_high, nyquist)
+    low = cutoff
     b, a = butter(order, [low/nyquist, high/nyquist], btype='band')
     y_signal = filtfilt(b, a, y)
-
-    # Energie (mittlere Leistung)
     signal_power = np.mean(y_signal**2) + 1e-10
     noise_power  = np.mean(y_noise**2) + 1e-10
 
@@ -200,16 +142,18 @@ def plot_spectrogram_and_scores(
     threshold=0.35,
     ID_TO_CLUSTER=None
 ):
-    """
-    Plottet Mel-Spektrogramm + Scores + Ground Truth für ein Segment.
+    """Plot mel spectrogram, class scores, and ground truth for one segment.
+
     Args:
-      mel_spec: (num_mels, T)
-      class_scores: (T, num_classes)
-      gt_onsets/gt_offsets: Listen mit Sekundenangaben der Labels im Segment
-      gt_classes: Klassen der Labels
-      segment_idx: Segment-Index
-      base_name: Dateiname (ohne Endung)
-      ID_TO_CLUSTER: optionales Mapping Klasse -> Name
+        mel_spec: (num_mels, T).
+        class_scores: (T, num_classes).
+        gt_onsets, gt_offsets: Onset/offset times in seconds for labels in segment.
+        gt_classes: Class of each label.
+        segment_idx: Segment index.
+        save_dir: Directory to save figure.
+        base_name: Base filename (no extension).
+        threshold: Score threshold line.
+        ID_TO_CLUSTER: Optional class id -> name mapping.
     """
     T = class_scores.shape[0]
     num_classes = class_scores.shape[1]
@@ -222,13 +166,11 @@ def plot_spectrogram_and_scores(
 
     fig, axs = plt.subplots(2, 1, figsize=(12, 6), height_ratios=[3, 1])
 
-    # 1️⃣ Mel-Spektrogramm
     librosa.display.specshow(mel_spec, sr=16000, hop_length=320, x_axis="time", y_axis="mel", ax=axs[0])
-    axs[0].set_title(f"{base_name} – Segment {segment_idx}: Mel-Spektrogramm")
+    axs[0].set_title(f"{base_name} – Segment {segment_idx}: Mel spectrogram")
     axs[0].set_xlabel("")
-    axs[0].set_ylabel("Mel-Frequenz (Hz)")
+    axs[0].set_ylabel("Mel frequency (Hz)")
 
-    # 2️⃣ Scores
     frame_width = sec_per_col 
     for c in range(num_classes):
         #axs[1].plot(time_axis, class_scores[:, c], label=f"Class {ID_TO_CLUSTER[c]}", alpha=0.8)
@@ -237,7 +179,7 @@ def plot_spectrogram_and_scores(
     axs[1].axhline(y=threshold, color='r', linestyle='--', label=f"Threshold {threshold}")
     axs[1].set_ylim(0, 1)
     axs[1].set_title("Scores + Ground Truth")
-    axs[1].set_xlabel("Zeit (s)")
+    axs[1].set_xlabel("Time (s)")
     axs[1].set_ylabel("Score")
     axs[1].set_xlim(0, T * sec_per_col) 
     
@@ -255,7 +197,6 @@ def plot_spectrogram_and_scores(
             axs[1].axvspan(onset, offset, color=colors[c % len(colors)], alpha=0.3, label=f"GT {ID_TO_CLUSTER[c]}")
     """
 
-    # Zeichnen
     for onset, offset, c in zip(gt_onsets, gt_offsets, gt_classes):
         axs[1].axvspan(
             2*onset, 2*offset, 
@@ -265,7 +206,6 @@ def plot_spectrogram_and_scores(
         )
 
 
-    # 🔁 Legende bereinigen (duplikate entfernen)
     handles, labels = axs[1].get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
     axs[1].legend(by_label.values(), by_label.keys(), loc="upper right")
@@ -294,15 +234,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
 # ==================== INFERENCE ====================
 
 def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
-    """
-    Führt Inferenz durch und ordnet jede Vorhersage exakt dem Slice in metadata_list zu.
-    Gibt eine Liste von Einträgen zurück:
-    {
-      "original_idx": int,
-      "segment_idx": int,
-      "preds": [ { "class": c, "intervals": [[start_col, end_col, score], ...] }, ... ]
-    }
-    """
+    """Run inference and assign each prediction to the corresponding slice in metadata_list."""
     preds_by_slice = []
     slice_idx = 0
     model.eval()
@@ -349,23 +281,19 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                     "original_idx": meta["original_idx"],
                     "segment_idx": meta["segment_idx"],
                     "preds": preds_per_class,
-                    # NEU: Scores je Frame (T x C) für spätere Mid-Frame-Auswertung
                     "scores": class_probs[b].detach().cpu().numpy()
                 })
 
     assert len(preds_by_slice) == len(metadata_list), (
-        f"Vorhersage-Liste ({len(preds_by_slice)}) ungleich Metadata-Liste ({len(metadata_list)}). "
-        "Prüfen Sie, ob DataLoader shuffle=False ist und die Reihenfolge konsistent ist."
+        f"Prediction list length ({len(preds_by_slice)}) != metadata list length ({len(metadata_list)}). "
+        "Ensure DataLoader uses shuffle=False and order is consistent."
     )
 
     return preds_by_slice
 
 
 def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
-    """
-    Rekonstruiert alle Vorhersagen aus Slice-Koordinaten in Datei-Zeitkoordinaten.
-    Gibt ein Dict mit Listen zurück: {"onset": [], "offset": [], "cluster": [], "score": []}
-    """
+    """Reconstruct predictions from slice coordinates to file time; returns onset, offset, cluster, score."""
     grouped_preds = defaultdict(list)
     for ps in preds_by_slice:
         grouped_preds[ps["original_idx"]].append(ps)
@@ -375,7 +303,6 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
 
     all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
 
-    # Über alle Originaldateien iterieren
     for orig_idx in sorted(grouped_preds.keys()):
         segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
         for seg in segs_sorted:
@@ -387,8 +314,6 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
                     end_sec   = (offset_cols + end_col)   * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
-                    # Map Klasse-ID -> Cluster-Label
-                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
                     all_preds_final["score"].append(float(score))
 
@@ -418,7 +343,6 @@ if __name__ == "__main__":
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     args = parser.parse_args()
 
-    # === Zeitgestempelten Unterordner erstellen ===
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = os.path.join(args.output_dir, timestamp)
     os.makedirs(save_dir, exist_ok=True)
@@ -427,7 +351,7 @@ if __name__ == "__main__":
     args_path = os.path.join(save_dir, "run_arguments.json")
     with open(args_path, "w") as f:
         json.dump(vars(args), f, indent=2)
-    print(f"✅ Argumente gespeichert unter: {args_path}")
+    print(f"Arguments saved to: {args_path}")
 
     #os.makedirs(args.output_dir, exist_ok=True)
 
@@ -465,11 +389,11 @@ if __name__ == "__main__":
 
         preds_by_slice = run_inference_new(
         model=model,
-        dataloader=dataloader,          # muss mit shuffle=False erstellt sein
+        dataloader=dataloader,
         device=args.device,
         threshold=args.threshold,
         iou_threshold=args.iou_threshold,
-        metadata_list=metadata_list     # kommt aus slice_audios_and_labels
+        metadata_list=metadata_list
         )
         for p in preds_by_slice:
             p["original_idx"] = i
@@ -529,7 +453,7 @@ if __name__ == "__main__":
             all_scores = np.concatenate(score_list, axis=0)
         else:
             all_scores = np.array([])  # oder None, je nach gewünschtem Verhalten
-            print("⚠️ Keine Scores gefunden – file_slices ist leer oder enthält keine gültigen 'scores'.")
+            print("No scores found; file_slices is empty or has no valid 'scores'.")
 
         # --- Pro Ground Truth Event ---
         for onset, offset, cluster_label, cluster_quality in zip(gt_onsets, gt_offsets, gt_clusters, gt_qualities):
@@ -592,10 +516,10 @@ if __name__ == "__main__":
         plt.close()
 
         corr = np.corrcoef(amplitudes, scores)[0, 1]
-        print(f"✅ Scatterplot gespeichert unter: {scatter_path}")
-        print(f"📈 Korrelation (Amplitude–Score): {corr:.3f}")
+        print(f"Scatterplot saved to: {scatter_path}")
+        print(f"Correlation (amplitude vs score): {corr:.3f}")
     else:
-        print("⚠️ Keine gültigen Punkte für Scatterplot gefunden.")
+        print("No valid points for scatter plot.")
 
 # === Zweiten Scatterplot erstellen ===
     if len(qualities) > 0:
@@ -612,10 +536,9 @@ if __name__ == "__main__":
         plt.close()
 
         #corr = np.corrcoef(qualities, scores)[0, 1]
-        print(f"✅ Scatterplot gespeichert unter: {scatter_path}")
-        #print(f"📈 Korrelation (Quality–Score): {corr:.3f}")
+        print(f"Scatterplot saved to: {scatter_path}")
     else:
-        print("⚠️ Keine gültigen Punkte für Scatterplot gefunden.")
+        print("No valid points for scatter plot.")
 
     # === Dritten Scatterplot: SNR vs Model Score ===
     if len(snrs) > 0:
@@ -631,11 +554,9 @@ if __name__ == "__main__":
         plt.savefig(scatter_path, dpi=150)
         plt.close()
 
-        #corr = np.corrcoef(snrs, scores)[0, 1]
-        print(f"✅ Scatterplot gespeichert unter: {scatter_path}")
-        #print(f"📈 Korrelation (SNR–Score): {corr:.3f}")
+        print(f"Scatterplot saved to: {scatter_path}")
     else:
-        print("⚠️ Keine gültigen Punkte für SNR-Scatterplot gefunden.")
+        print("No valid points for SNR scatter plot.")
 
     # === Scatterplot: SNR vs Quality ===
     if len(snrs) > 0 and len(qualities) > 0:
@@ -651,9 +572,9 @@ if __name__ == "__main__":
         snr_quality_path = os.path.join(save_dir, "boxplot_snr_vs_quality.png")
         plt.savefig(snr_quality_path, dpi=150)
         plt.close()
-        print(f"✅ Boxplot gespeichert unter: {snr_quality_path}")
+        print(f"Boxplot saved to: {snr_quality_path}")
     else:
-        print("⚠️ Keine gültigen Daten für SNR–Quality-Plot gefunden.")
+        print("No valid data for SNR vs quality plot.")
 
 
     # === Scatterplot: Max Amplitude vs Quality ===
@@ -662,17 +583,17 @@ if __name__ == "__main__":
         sns.boxplot(x=qualities, y=amplitudes, palette="Set2", showfliers=False)
         sns.stripplot(x=qualities, y=amplitudes, color="k", alpha=0.5, jitter=0.2)
         plt.xlabel("Quality Class")
-        plt.ylabel("Maximale Amplitude")
-        plt.title("Maximale Amplitude vs. Quality Class")
+        plt.ylabel("Max amplitude")
+        plt.title("Max amplitude vs quality class")
         plt.grid(True, linestyle="--", alpha=0.6)
         plt.tight_layout()
 
         amp_quality_path = os.path.join(save_dir, "boxplot_amplitude_vs_quality.png")
         plt.savefig(amp_quality_path, dpi=150)
         plt.close()
-        print(f"✅ Boxplot gespeichert unter: {amp_quality_path}")
+        print(f"Boxplot saved to: {amp_quality_path}")
     else:
-        print("⚠️ Keine gültigen Daten für Amplitude–Quality-Plot gefunden.")
+        print("No valid data for amplitude vs quality plot.")
 
     """
     labels_internal = ["t", "m", "w"]

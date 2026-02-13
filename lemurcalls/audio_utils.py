@@ -10,8 +10,18 @@ import matplotlib.cm as cm
 
 
 class WhisperSegFeatureExtractor( WhisperFeatureExtractor ):
+    """Feature extractor for WhisperSeg with configurable mel filters."""
+
     def __init__(self, sr, spec_time_step, min_frequency = None, max_frequency = None, chunk_length = 30 ):
-        
+        """Initialize with sampling rate and spectrogram parameters.
+
+        Args:
+            sr: Sampling rate in Hz.
+            spec_time_step: Time step per spectrogram column in seconds.
+            min_frequency: Minimum frequency for mel filter bank (optional).
+            max_frequency: Maximum frequency for mel filter bank (optional).
+            chunk_length: Chunk length in seconds (optional).
+        """
         hop_length = int( spec_time_step * sr )
         if hop_length != spec_time_step * sr:
             print("Warning: spec_time_step * sr must be an integer. Consider changing the sampling rate sr.")
@@ -52,8 +62,11 @@ class WhisperSegFeatureExtractor( WhisperFeatureExtractor ):
         )
             
 class SpecViewer:
+    """Interactive spectrogram and label viewer."""
+
     def __init__( self,  ):
-        self.colors = [np.array(mcolors.hex2color(color_string)) for color_string in list(mcolors.TABLEAU_COLORS.values()) + list(mcolors.CSS4_COLORS.values())][1:] # Skip the first color since it looks not so good ...
+        """Initialize color palette for cluster visualization."""
+        self.colors = [np.array(mcolors.hex2color(color_string)) for color_string in list(mcolors.TABLEAU_COLORS.values()) + list(mcolors.CSS4_COLORS.values())][1:]  # Skip first color
         unique_colors = None
         for color_arr in self.colors:
             if unique_colors is None:
@@ -65,18 +78,37 @@ class SpecViewer:
         
         self.cmap = cm.get_cmap("magma")
             
-    """"
-    The following functions are used for implement an interactive visulization function to see the spectrogram and the label
-    """
+    """The following functions are used to implement an interactive visualization
+    of the spectrogram and labels."""
 
     def chunk_audio(self, audio, start_time, end_time, sr):
+        """Extract audio segment between start_time and end_time.
+
+        Args:
+            audio: Audio array.
+            start_time: Start time in seconds.
+            end_time: End time in seconds.
+            sr: Sampling rate.
+
+        Returns:
+            Audio chunk as array.
+        """
         start_idx = int( start_time * sr )
         end_idx = int( end_time * sr )
         chunked_audio = audio[start_idx:end_idx]
         return chunked_audio    
 
     def chunk_label(self, label, start_time, end_time ):
-        
+        """Extract label segment that overlaps [start_time, end_time].
+
+        Args:
+            label: Dict with onset, offset, cluster.
+            start_time: Start time in seconds.
+            end_time: End time in seconds.
+
+        Returns:
+            Dict with chunked onset, offset, cluster (relative to start_time).
+        """
         label_onset_arr = np.array(label["onset"])
         label_offset_arr = np.array(label["offset"])
         
@@ -89,6 +121,16 @@ class SpecViewer:
         return chunked_label   
     
     def min_max_norm(self, im, min_value = None, max_value = None ):
+        """Normalize array to [0, 1] by min-max.
+
+        Args:
+            im: Input array.
+            min_value: Optional min; defaults to im.min().
+            max_value: Optional max; defaults to im.max().
+
+        Returns:
+            Normalized float array.
+        """
         if min_value is None:
             min_value = im.min()
         if max_value is None:
@@ -219,6 +261,18 @@ class SpecViewer:
 
     
 def slice_audio_and_label( audio, label, sr, start_time, end_time ):
+    """Slice audio and label to the given time range.
+
+    Args:
+        audio: Audio array.
+        label: Label dict with onset, offset, cluster.
+        sr: Sampling rate.
+        start_time: Start time in seconds.
+        end_time: End time in seconds.
+
+    Returns:
+        Tuple (sliced_audio, sliced_label). Label times are relative to start_time.
+    """
     sliced_audio = audio[ int( start_time * sr ):int( end_time * sr ) ]
     duration = len(sliced_audio) / sr
     ## get the actual ending time

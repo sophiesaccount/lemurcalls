@@ -18,7 +18,14 @@ from collections import Counter
 
 
 def get_audio_and_label_paths( folder ):
-    #wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith(".wav") ]
+    """Collect paths to .wav files and matching .json label files in a folder.
+
+    Args:
+        folder: Directory containing .wav and .json files.
+
+    Returns:
+        Tuple (audio_paths, label_paths); only pairs where both exist are included.
+    """
     wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith((".WAV", ".wav")) ]
     audio_paths = []
     label_paths = []
@@ -31,8 +38,16 @@ def get_audio_and_label_paths( folder ):
     return audio_paths, label_paths
 
 def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
+    """Collect audio and label paths from two folders by matching basenames.
+
+    Args:
+        audio_folder: Directory of .wav files.
+        label_folder: Directory of .json files.
+
+    Returns:
+        Tuple (audio_paths, label_paths) for pairs with matching basenames.
+    """
     audio_files = {os.path.splitext(f)[0]: os.path.join(audio_folder, f)
-                   #for f in os.listdir(audio_folder) if f.endswith(".wav")}
                    for f in os.listdir(audio_folder) if f.endswith((".WAV", ".wav"))}
     label_files = {os.path.splitext(f)[0]: os.path.join(label_folder, f)
                    for f in os.listdir(label_folder) if f.endswith(".json")}
@@ -51,7 +66,7 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
     for label in label_files:
         #key = os.path.splitext(label)[0]  # "LEMUR123"
         key = os.path.splitext(label)[0].replace("_preds", "")
-        # suche Audio, das diesen Key enthält
+        # Find audio that contains this key
         match = [a for a in audio_files if key in a]
         if match:
             audio_paths.append(os.path.join(audio_folder, match[0]))
@@ -60,6 +75,7 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
     return audio_paths, label_paths
 
 def get_cluster_codebook( label_paths, initial_cluster_codebook ):
+    """Build cluster codebook from label files (no make_equal)."""
     cluster_codebook = deepcopy( initial_cluster_codebook )
     
     unique_clusters = []
@@ -77,23 +93,20 @@ def get_cluster_codebook( label_paths, initial_cluster_codebook ):
 
 
 def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None):
-    """
-    Erzeugt ein Cluster-Codebook aus gegebenen Label-Dateien.
-    
-    Parameter:
-    ----------
-    label_paths : list[str]
-        Liste der Pfade zu JSON-Label-Dateien. Jede Datei enthält 'cluster'.
-    initial_cluster_codebook : dict
-        Bereits existierendes Codebook {cluster_name: class_id}.
-    make_equal : None | list[str] | 'all', optional
-        - None: Standardverhalten (keine Änderungen)
-        - list[str]: Alle Cluster in dieser Liste werden auf die gleiche Klasse gemappt.
-        - 'all': Alle Cluster werden auf die gleiche Klasse gemappt.
+    """Build a cluster codebook from given label files.
+
+    Args:
+        label_paths: List of paths to JSON label files; each file contains 'cluster'.
+        initial_cluster_codebook: Existing codebook {cluster_name: class_id}.
+        make_equal: Optional. None: default (no changes). list[str]: all clusters in
+            this list are mapped to the same class. 'all': all clusters mapped to one class.
+
+    Returns:
+        Updated cluster codebook dict.
     """
     cluster_codebook = deepcopy(initial_cluster_codebook)
 
-    # --- Alle Cluster sammeln ---
+    # Collect all clusters
     all_clusters = []
     for label_file in label_paths:
         with open(label_file, 'r') as f:
@@ -101,7 +114,7 @@ def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None)
         all_clusters += [str(cluster) for cluster in label.get("cluster", [])]
 
 
-    # --- Alle Cluster aus den Label-Dateien sammeln ---
+    # Collect unique clusters from label files
     unique_clusters = []
     for label_file in label_paths:
         with open(label_file, 'r') as f:
@@ -110,53 +123,53 @@ def get_cluster_codebook(label_paths, initial_cluster_codebook, make_equal=None)
 
     unique_clusters = sorted(list(set(unique_clusters)))
 
-    # --- Häufigkeiten zählen ---
+    # Count frequencies
     top_k = 10
     cluster_counts = Counter(all_clusters)
-    print(f"\n📊 Top 10 häufigste Cluster:")
+    print("\nTop 10 most frequent clusters:")
     for cluster, count in cluster_counts.most_common(top_k):
-        print(f"   {cluster:20s} -> {count} Vorkommen")
+        print(f"   {cluster:20s} -> {count} occurrences")
 
-    # --- make_equal verarbeiten ---
+    # Process make_equal
     if make_equal == 'all':
-        # Alle Cluster sollen dieselbe Klasse teilen
+        # All clusters share the same class
         target_class_id = cluster_codebook.get("__merged__", len(cluster_codebook))
         cluster_codebook["__merged__"] = target_class_id
         for cluster in unique_clusters:
             cluster_codebook[cluster] = target_class_id
 
     elif isinstance(make_equal, (list, set, tuple)):
-        # Cluster aus der make_equal-Liste auf eine Klasse mappen
+        # Map clusters from make_equal list to one class
         make_equal = [str(c) for c in make_equal]
         target_class_id = None
 
-        # Falls einer der Namen schon im Codebook existiert, diese ID benutzen
+        # If one of the names already exists in the codebook, use that ID
         for c in make_equal:
             if c in cluster_codebook:
                 target_class_id = cluster_codebook[c]
                 break
 
-        # Falls noch nicht vorhanden, neue Klasse anlegen
+        # If not present yet, create new class
         if target_class_id is None:
             target_class_id = len(cluster_codebook)
             cluster_codebook[make_equal[0]] = target_class_id
 
-        # Alle Cluster aus make_equal auf dieselbe Klasse mappen
+        # Map all clusters from make_equal to the same class
         for c in make_equal:
             cluster_codebook[c] = target_class_id
 
-        # Alle übrigen Cluster normal hinzufügen
+        # Add remaining clusters normally
         for cluster in unique_clusters:
             if cluster not in cluster_codebook:
                 cluster_codebook[cluster] = len(cluster_codebook)
 
     else:
-        # Standardfall: alles normal hinzufügen
+        # Default: add all clusters normally
         for cluster in unique_clusters:
             if cluster not in cluster_codebook:
                 cluster_codebook[cluster] = len(cluster_codebook)
 
-    # --- Anzahl der Klassen ausgeben ---
+    # Output number of classes
     num_classes_new = len(set(cluster_codebook.values()))
 
     print(f"Number of Classes in Codebook: {num_classes_new}")
@@ -209,7 +222,7 @@ FIXED_CLUSTER_CODEBOOK = {
 
 #ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
-# Optional: inverse Mapping für spätere Rekonstruktion
+# Optional: inverse mapping for later reconstruction
 #ID_TO_CLUSTER = {v: k for k, v in FIXED_CLUSTER_CODEBOOK.items()}
 
 
@@ -496,7 +509,7 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0
             #    break
 
 
-            # Labels anpassen: nur Events im Zeitfenster behalten
+            # Adjust labels: keep only events in the time window
             start_time = start / sr
             end_time = end / sr
             intersected_indices = np.logical_and(
@@ -512,7 +525,7 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, offset=0
                 "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
             })
 
-            # speichern
+            # Store
             new_audios.append(audio_clip)
             new_labels.append(label_clip)
             new_metadata.append({

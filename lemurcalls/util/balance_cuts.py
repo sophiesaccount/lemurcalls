@@ -105,7 +105,7 @@ def find_gaps(file_path: str, max_silence: int, output_dir: str) -> None:
                     num_fragments=num_fragments,
                     onset=json_data['onset'][start],
                     offset=json_data['offset'][i],
-                    pre_distance=(abs(json_data['offset'][start-1] - json_data['onset'][start]) if start > 1 else 1), # else 1 = safety padding from trim_wavs.py
+                    pre_distance=(abs(json_data['offset'][start-1] - json_data['onset'][start]) if start > 1 else 1),  # else 1 = safety padding from trim_wavs.py
                     # pre_distance=(abs(json_data['offset'][i-1] - json_data['onset'][i]) if i > 1 else 1),
                     post_distance=abs(json_data['offset'][i] - json_data['onset'][i+1]),
                     output_dir=output_dir,

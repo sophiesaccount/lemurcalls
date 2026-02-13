@@ -29,9 +29,9 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
     """
     padded_audio_list = [
         np.concatenate([
-            np.zeros((pad_columns, 1)),           # Padding vorne
-            np.expand_dims(a, axis=1),            # a von (T,) → (T,1)
-            np.zeros((pad_columns, 1))            # Padding hinten
+            np.zeros((pad_columns, 1)),
+            np.expand_dims(a, axis=1),
+            np.zeros((pad_columns, 1))
         ], axis=0)
         for a in audio_list
     ]
@@ -56,7 +56,6 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
             #    break
 
 
-            # Labels anpassen: nur Events im Zeitfenster behalten
             start_time = start / sr
             end_time = end / sr
             intersected_indices = np.logical_and(
@@ -71,29 +70,25 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
                 "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
                 "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
             })
-
-            # speichern
             new_audios.append(audio_clip)
             new_labels.append(label_clip)
             new_metadata.append({
                 "original_idx": orig_idx,
                 "segment_idx": seg_idx,
-                "offset_frac": offset,   # tells us in which trial we are, by giving us the offset
+                "offset_frac": offset,
                 "trial_id": offset
             })
-
             start += num_samples_in_clip
             seg_idx += 1
 
-
     return new_audios, new_labels, new_metadata
 
-# ==================== MODEL LOADING ====================
 
 def detect_whisper_size_from_state_dict(state_dict):
-    """
-    Whisper-Größe anhand der Gewicht-Dimensionen im State Dict erkennen.
-    Whisper Base: d_model=512, Whisper Large: d_model=1280
+    """Detect Whisper size from state dict weight dimensions (base: d_model=512, large: d_model=1280).
+
+    Returns:
+        "base", "large", or None if not recognized.
     """
     for key in state_dict.keys():
         if "conv1.weight" in key:
@@ -106,26 +101,22 @@ def detect_whisper_size_from_state_dict(state_dict):
 
 
 def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device, whisper_size=None):
+    """Load a trained WhisperFormer model from checkpoint.
+
+    The checkpoint contains all weights (including frozen encoder). Only WhisperConfig
+    is loaded from disk; encoder weights come from the checkpoint. Whisper size is
+    detected from the checkpoint (d_model 512 -> base, 1280 -> large) unless given.
+
+    Returns:
+        Tuple (model, detected_size string).
     """
-    Lade trainiertes WhisperFormer Modell.
-    
-    Der Checkpoint enthält ALLE Gewichte (inkl. frozen Encoder).
-    Es wird nur die WhisperConfig (kleines JSON) geladen, NICHT das volle
-    Pretrained-Modell -- die Encoder-Gewichte kommen direkt aus dem Checkpoint.
-    
-    Whisper-Größe wird automatisch aus dem Checkpoint erkannt
-    (d_model=512 -> base, d_model=1280 -> large).
-    """
-    # 1) State Dict einmal laden
     state_dict = torch.load(checkpoint_path, map_location=device)
-    
-    # 2) Whisper-Größe bestimmen
+
     if whisper_size and whisper_size.lower() in ["base", "large"]:
         detected_size = whisper_size.lower()
     else:
         detected_size = detect_whisper_size_from_state_dict(state_dict)
         if detected_size is None:
-            # Fallback: aus Checkpoint-Pfad erkennen
             path_lower = checkpoint_path.lower()
             if "large" in path_lower:
                 detected_size = "large"
@@ -133,9 +124,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
                 detected_size = "base"
     
     print(f"Detected Whisper size: {detected_size}")
-    
-    # 3) Nur die Config laden (kleines JSON) -- kein from_pretrained noetig,
-    #    da alle Gewichte (inkl. Encoder) aus dem Checkpoint kommen
+
     _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     _whisper_models_dir = os.path.join(_project_root, "whisper_models")
     config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
@@ -145,9 +134,8 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
     encoder = whisper_model.encoder
     
     model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
-    
-    # 4) Praefix-Korrektur: Checkpoint hat "encoder.X", Modell erwartet "encoder.encoder.X"
-    #    wegen WhisperEncoder-Wrapper (self.encoder = encoder in whisperformer_model_base.py)
+
+    # Checkpoint may have "encoder.X"; model expects "encoder.encoder.X" due to WhisperEncoder wrapper
     needs_remap = any(
         k.startswith("encoder.") and not k.startswith("encoder.encoder.") 
         for k in state_dict.keys()
@@ -160,8 +148,7 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
             else:
                 new_state_dict[k] = v
         state_dict = new_state_dict
-    
-    # 5) ALLE Gewichte (Encoder + Decoder + Heads) aus dem Checkpoint laden
+
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
@@ -201,6 +188,7 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
 # ==================== CONSOLIDATION ====================
 
 def consolidate_preds(all_preds_runs, overlap_tolerance=0.1):
+    """Merge overlapping predictions across multiple runs; keep best score per overlap group."""
     consolidated = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
     combined_preds = []
 

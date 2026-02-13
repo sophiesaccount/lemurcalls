@@ -84,7 +84,7 @@ def evaluate_detection_metrics_with_false_class_qualities_q3_q2(labels, predicti
             if ov > overlap_tolerance and str(pc) == str(lc):
                 matched_labels.add(l_idx)
                 matched_preds.add(p_idx)
-    #dann nach false class
+    # Then check for false class (overlap but wrong class)
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
         for l_idx, (lo, lf, lc, lq) in enumerate(zip(label_onsets, label_offsets, label_clusters, label_qualities)):
             if l_idx in matched_labels or p_idx in matched_preds or int(float(lq)) != 1:
@@ -142,8 +142,7 @@ def evaluate_detection_metrics_with_false_class_qualities_q3_q2(labels, predicti
 
 
 def group_by_file(all_preds, all_labels, metadata_list):
-    """Gibt dicts zurück: {file_idx: {'onset':[], 'offset':[], 'cluster':[], 'score':[]}}"""
-    # Vorhersagen gruppieren
+    """Group predictions and labels by file index. Returns preds_grouped, labels_grouped dicts."""
     preds_grouped = defaultdict(lambda: {"onset": [], "offset": [], "cluster": [], "score": []})
     for i, o in enumerate(all_preds["onset"]):
         file_idx = all_preds["orig_idx"][i]  
@@ -153,7 +152,6 @@ def group_by_file(all_preds, all_labels, metadata_list):
         preds_grouped[file_idx]["cluster"].append(all_preds["cluster"][i])
         preds_grouped[file_idx]["score"].append(all_preds["score"][i])
 
-    # Labels gruppieren (falls all_labels noch nicht pro file_idx)
     labels_grouped = defaultdict(lambda: {"onset": [], "offset": [], "cluster": [], "quality": []})
     for i, o in enumerate(all_labels["onset"]):
         file_idx = all_labels["orig_idx"][i]
@@ -193,16 +191,14 @@ if __name__ == "__main__":
                         help="Custom thresholds to evaluate (e.g. --thresholds 0.1 0.2 0.3). Default: [0.1, 0.15, 0.2, 0.25, 0.3, 0.35]")
     args = parser.parse_args()
 
-    # === Zeitgestempelten Unterordner erstellen ===
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = os.path.join(args.output_dir, timestamp)
     os.makedirs(save_dir, exist_ok=True)
 
-    # === Argumente speichern ===
     args_path = os.path.join(save_dir, "run_arguments.json")
     with open(args_path, "w") as f:
         json.dump(vars(args), f, indent=2)
-    print(f"✅ Argumente gespeichert unter: {args_path}")
+    print(f"Arguments saved to: {args_path}")
 
     #os.makedirs(args.output_dir, exist_ok=True)
 
@@ -395,7 +391,7 @@ if __name__ == "__main__":
     metrics_path = os.path.join(save_dir, "metrics_all_qualities.txt")
 
     with open(metrics_path, "w") as f:
-        f.write(f"Globale Metriken für threshold {args.threshold} und iou threshold {args.iou_threshold}: \n")
+        f.write(f"Global metrics for threshold {args.threshold} and iou threshold {args.iou_threshold}:\n")
         f.write(f"TP: {tp_total}\n")
         f.write(f"FP: {fp_total}\n")
         f.write(f"FN: {fn_total}\n")
@@ -411,7 +407,7 @@ if __name__ == "__main__":
         f.write(f"Recall:    {recalls_rounded}\n")
         f.write(f"F1-Score:  {f1s_rounded}\n\n")
 
-    print(f"✅ Globale Metriken gespeichert unter {metrics_path}")
+    print(f"Global metrics saved to {metrics_path}")
 
     import matplotlib.pyplot as plt
 

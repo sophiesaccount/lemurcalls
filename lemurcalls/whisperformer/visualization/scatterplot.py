@@ -22,9 +22,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import contextlib
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities = [1,2]):
-    # Falls Qualitätsfilter gesetzt: GT filtern
-
+def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance, allowed_qualities=[1, 2]):
+    """Compute precision/recall/F1 with quality filtering; count false-class matches separately."""
     label_onsets   = labels['onset']
     label_offsets  = labels['offset']
     label_clusters = labels['cluster']
@@ -33,13 +32,11 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     #print(label_qualities)
 
     if allowed_qualities is not None:
-        # alles zu int konvertieren (wenn möglich)
         try:
             allowed_ints = set(int(q) for q in allowed_qualities)
             label_ints = np.array([int(float(q)) for q in label_qualities])
             mask = np.array([q in allowed_ints for q in label_ints], dtype=bool)
         except ValueError:
-            # fallback auf stringvergleich, falls nicht-numerische Qualitäten vorkommen
             allowed_str = set(str(q) for q in allowed_qualities)
             qual_str = np.array([str(q) for q in label_qualities])
             mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
@@ -49,7 +46,6 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         label_clusters = np.array(label_clusters)[mask]
 
 
-    # Predictions laden
     pred_onsets = np.array(predictions['onset'])
     pred_offsets = np.array(predictions['offset'])
     pred_clusters = np.array(predictions['cluster'])
@@ -59,10 +55,9 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     matched_preds = set()
     false_class = 0
 
-    gtp = len(label_onsets)      # jetzt nur noch Quality∈allowed
+    gtp = len(label_onsets)
     pp  = len(pred_onsets)
 
-    # Matching
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
         for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
             if l_idx in matched_labels or p_idx in matched_preds:
@@ -109,14 +104,10 @@ def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers,
 # ==================== INFERENCE ====================
 
 def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
-    """
-    Führt Inferenz durch und ordnet jede Vorhersage exakt dem Slice in metadata_list zu.
-    Gibt eine Liste von Einträgen zurück:
-    {
-      "original_idx": int,
-      "segment_idx": int,
-      "preds": [ { "class": c, "intervals": [[start_col, end_col, score], ...] }, ... ]
-    }
+    """Run inference and assign each prediction to the corresponding slice in metadata_list.
+
+    Returns:
+        List of dicts with original_idx, segment_idx, preds (list of class + intervals).
     """
     preds_by_slice = []
     slice_idx = 0
@@ -124,12 +115,10 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
 
     with torch.no_grad():
         for batch in dataloader:
-            # Tensoren auf Device bringen
             for k, v in batch.items():
                 if isinstance(v, torch.Tensor):
                     batch[k] = v.to(device, non_blocking=True)
 
-            # Autocast nur auf CUDA aktivieren
             use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (hasattr(device, "type") and device.type == "cuda")
             autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
 
@@ -139,7 +128,6 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
 
             B, T, C = class_preds.shape
             for b in range(B):
-                # passendes Slice aus metadata_list holen
                 meta = metadata_list[slice_idx]
                 slice_idx += 1
 
@@ -168,30 +156,24 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                     "preds": preds_per_class
                 })
 
-    # Sanity-Check: Anzahl Slices sollte übereinstimmen
     assert len(preds_by_slice) == len(metadata_list), (
-        f"Vorhersage-Liste ({len(preds_by_slice)}) ungleich Metadata-Liste ({len(metadata_list)}). "
-        "Prüfen Sie, ob DataLoader shuffle=False ist und die Reihenfolge konsistent ist."
+        f"Prediction list length ({len(preds_by_slice)}) != metadata list length ({len(metadata_list)}). "
+        "Ensure DataLoader uses shuffle=False and order is consistent."
     )
 
     return preds_by_slice
 
 
 def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
-    """
-    Rekonstruiert alle Vorhersagen aus Slice-Koordinaten in Datei-Zeitkoordinaten.
-    Gibt ein Dict mit Listen zurück: {"onset": [], "offset": [], "cluster": [], "score": []}
-    """
+    """Reconstruct predictions from slice coordinates to file time; returns onset, offset, cluster, score."""
     grouped_preds = defaultdict(list)
     for ps in preds_by_slice:
         grouped_preds[ps["original_idx"]].append(ps)
 
     sec_per_col = 0.02
-    cols_per_segment = total_spec_columns // 2  # T entspricht total_spec_columns/2
-
+    cols_per_segment = total_spec_columns // 2
     all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
 
-    # Über alle Originaldateien iterieren
     for orig_idx in sorted(grouped_preds.keys()):
         segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
         for seg in segs_sorted:
@@ -203,8 +185,6 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
                     end_sec   = (offset_cols + end_col)   * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
-                    # Map Klasse-ID -> Cluster-Label
-                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
                     all_preds_final["score"].append(float(score))
 
@@ -233,7 +213,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type = int, default = 1 )
     args = parser.parse_args()
 
-    # === Zeitgestempelten Unterordner erstellen ===
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = os.path.join(args.output_dir, timestamp)
     os.makedirs(save_dir, exist_ok=True)
@@ -242,7 +221,7 @@ if __name__ == "__main__":
     args_path = os.path.join(save_dir, "run_arguments.json")
     with open(args_path, "w") as f:
         json.dump(vars(args), f, indent=2)
-    print(f"✅ Argumente gespeichert unter: {args_path}")
+    print(f"Arguments saved to: {args_path}")
 
     #os.makedirs(args.output_dir, exist_ok=True)
 
@@ -289,11 +268,9 @@ if __name__ == "__main__":
     json_path = os.path.join(save_dir, f"{base_name}_preds.json")
     with open(json_path, "w") as f:
         json.dump(final_preds, f, indent=2)
-    print(f"✅ Predictions saved to {json_path}")
+    print(f"Predictions saved to {json_path}")
     
-        #---- get labels for calculation of F1 val score ----#
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
-    # Labels laden
     for label_path in label_path_list_val:
         with open(label_path, "r") as f:
             labels = json.load(f)
@@ -301,14 +278,12 @@ if __name__ == "__main__":
         clusters = labels["cluster"]
         labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
-        # Quality-Klassen hinzufügen
         if "quality" in labels:
             quality_list = labels["quality"]
         else:
             quality_list = ["unknown"] * len(labels["onset"])
 
 
-        # --- globale Sammler befüllen ---
         all_labels["onset"].extend(labels["onset"])
         all_labels["offset"].extend(labels["offset"])
         all_labels["cluster"].extend(labels["cluster"])
@@ -358,13 +333,12 @@ if __name__ == "__main__":
         f.write(f"Recall:    {recall:.4f}\n")
         f.write(f"F1-Score:  {f1_all:.4f}\n\n")
 
-    print(f"✅ Globale Metriken gespeichert unter {metrics_path}")
+    print(f"Global metrics saved to {metrics_path}")
 
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
-    # ---- Confusion Matrix für Klassen + None ----
-    all_classes = sorted(set(all_labels["cluster"]))   # alle echten Klassen
-    class_names = all_classes + ["None"]               # zusätzliche None-Klasse
+    all_classes = sorted(set(all_labels["cluster"]))
+    class_names = all_classes + ["None"]
 
     y_true = []
     y_pred = []
@@ -372,7 +346,6 @@ if __name__ == "__main__":
     matched_labels = set()
     matched_preds = set()
 
-    # Match Events wie bei evaluate_detection_metrics_with_false_class
     for p_idx, (po, pf, pc) in enumerate(zip(all_preds_final['onset'],
                                             all_preds_final['offset'],
                                             all_preds_final['cluster'])):
@@ -388,38 +361,33 @@ if __name__ == "__main__":
             if overlap_ratio > args.overlap_tolerance:
                 matched_labels.add(l_idx)
                 matched_preds.add(p_idx)
-                # korrekt lokalisiert → check Klassen
                 if lc == pc:
                     y_true.append(lc)
                     y_pred.append(pc)
                 else:
-                    # falsche Klasse
                     y_true.append(lc)
                     y_pred.append(pc)
 
-    # False Negatives (Labels ohne Match)
     for l_idx, (lc, lq) in enumerate(zip(all_labels['cluster'], all_labels['quality'])):
         if l_idx not in matched_labels and lq != '3':
             y_true.append(lc)
             y_pred.append("None")
 
-    # False Positives (Preds ohne Match)
     for p_idx, pc in enumerate(all_preds_final['cluster']):
         if p_idx not in matched_preds:
             y_true.append("None")
             y_pred.append(pc)
 
-    # ---- Confusion Matrix berechnen und plotten ----
     cm = confusion_matrix(y_true, y_pred, labels=class_names)
 
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
     fig, ax = plt.subplots(figsize=(8, 6))
     disp.plot(ax=ax, cmap="Blues", xticks_rotation=45)
-    plt.title("Confusion-Matrix (Klassen + None)")
+    plt.title("Confusion matrix (classes + None)")
     plt.tight_layout()
 
     cm_path = os.path.join(save_dir, "confusion_matrix_classes_none.png")
     plt.savefig(cm_path, dpi=150)
     plt.close()
 
-    print(f"✅ Confusion-Matrix gespeichert unter {cm_path}")
+    print(f"Confusion matrix saved to {cm_path}")

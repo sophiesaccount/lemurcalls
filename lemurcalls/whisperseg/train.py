@@ -25,9 +25,15 @@ from ..utils import *
 
 
 def collate_fn(batch):
-    # batch is a list of samples (dicts)
-    
-    #input_features = [item["input_features"].clone().detach().float() for item in batch]
+    """Stack batch items into tensors for input_features, decoder_input_ids, labels.
+
+    Args:
+        batch: List of sample dicts from VocalSegDataset.
+
+    Returns:
+        dict: Batched tensors for input_features, decoder_input_ids, labels.
+    """
+    # input_features = [item["input_features"].clone().detach().float() for item in batch]
     #decoder_input_ids = [item["decoder_input_ids"].clone().detach().long() for item in batch]
     #labels = [item["labels"].clone().detach().long() for item in batch]
 
@@ -48,6 +54,7 @@ def collate_fn(batch):
 
 
 def train_iteration(batch):
+    """Run one training step (forward, loss, backward, step). Uses global model, optimizer, scaler, device."""
     for key in batch:
         batch[key] = batch[key].to(device)
     
@@ -61,8 +68,25 @@ def train_iteration(batch):
     scaler.update()
     return loss.item()
 
-def evaluate( audio_list, label_list, segmenter, batch_size, max_length, num_trials, consolidation_method = "clustering", num_beams=4, target_cluster = None, confusion_matrix: str = None, save_cm_data: str = None):
+def evaluate(audio_list, label_list, segmenter, batch_size, max_length, num_trials, consolidation_method="clustering", num_beams=4, target_cluster=None, confusion_matrix: str = None, save_cm_data: str = None):
+    """Run segmenter on each audio and aggregate segment-wise and frame-wise precision/recall/F1.
 
+    Args:
+        audio_list: List of audio arrays.
+        label_list: List of label dicts (with sr, min_frequency, spec_time_step, etc.).
+        segmenter: Segmenter instance with .segment(), .segment_score(), .frame_score().
+        batch_size: Batch size for segmenter.segment().
+        max_length: Max generation length.
+        num_trials: Number of trials for multi-trial segmentation.
+        consolidation_method: 'clustering' or voting method.
+        num_beams: Beam size.
+        target_cluster: If set, score only this cluster; else all.
+        confusion_matrix: Optional name to compute/save confusion matrix.
+        save_cm_data: Optional name to save raw prediction/label for confusion analysis.
+
+    Returns:
+        dict: 'segment_wise' and 'frame_wise' lists [TP, P_pred, P_label, precision, recall, f1].
+    """
     total_n_true_positive_segment_wise, total_n_positive_in_prediction_segment_wise, total_n_positive_in_label_segment_wise = 0,0,0
     total_n_true_positive_frame_wise, total_n_positive_in_prediction_frame_wise, total_n_positive_in_label_frame_wise = 0,0,0
 
@@ -80,7 +104,7 @@ def evaluate( audio_list, label_list, segmenter, batch_size, max_length, num_tri
             num_trials = num_trials,
             num_beams = num_beams
         )
-        # dirty workaround to pass the job-id in `confusion_matrix` and `save_cm_data
+        # Workaround to pass job-id via confusion_matrix and save_cm_data
         if confusion_matrix != None:
             confusion_matrix_framewise(prediction, label, None, 0.001, name=confusion_matrix)
         if save_cm_data != None:

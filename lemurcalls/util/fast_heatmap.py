@@ -1,7 +1,8 @@
+"""Generate a heatmap from precomputed confusion/count data (script)."""
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-data = [ # cut: P1: ht, o, ud, n, e, c; P2: hw, d, up; P3: p3, se, sk, wa, ho
+data = [  # cut: P1: ht, o, ud, n, e, c; P2: hw, d, up; P3: p3, se, sk, wa, ho
   # [ cl,   m,   l,  ca, sh,  b, pc, p1, cm,       +           h,  pu,  mo,  w, p2, +        t, sq,  y, hu, + ],
     [30, 7, 37, 18, 1, 4, 0, 13, 3, 23, 27, 0, 5, 0, 0, 0, 7, 2, 1, 2, 1, 181],
     [76, 4, 27, 72, 15, 2, 0, 0, 2, 7, 66, 39, 15, 0, 0, 0, 40, 0, 1, 2, 0, 368],

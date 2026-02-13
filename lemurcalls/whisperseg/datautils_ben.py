@@ -13,8 +13,16 @@ from ..util.common import is_scheduled_job
 from ..utils import RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP
 
 
-def get_audio_and_label_paths( folder ):
-    wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith(".wav", ".WAV") ]
+def get_audio_and_label_paths(folder):
+    """Collect audio and label paths from a single folder (wav + matching json).
+
+    Args:
+        folder: Directory containing .wav/.WAV and .json files.
+
+    Returns:
+        tuple: (audio_paths, label_paths) for files that have both.
+    """
+    wav_list = [ folder + "/" + fname for fname in os.listdir( folder ) if fname.endswith((".wav", ".WAV")) ]
     audio_paths = []
     label_paths = []
     for wav_name in tqdm(wav_list, desc="prep_data", disable=is_scheduled_job()):
@@ -30,8 +38,8 @@ def get_audio_and_label_paths_from_folders(audio_folder, label_folder):
 
     audio_paths, label_paths = [], []
     for label in label_files:
-        key = os.path.splitext(label)[0]  # "LEMUR123"
-        # suche Audio, das diesen Key enthält
+        key = os.path.splitext(label)[0]  # e.g. "LEMUR123"
+        # Find audio file that contains this key
         match = [a for a in audio_files if key in a]
         if match:
             audio_paths.append(os.path.join(audio_folder, match[0]))
@@ -158,15 +166,24 @@ def split_audio_and_label( audio, label, split_ratio ):
         "cluster": [ label["cluster"][idx] for idx in np.argwhere( intersected_indices_part2 )[:,0] ]
     })
 
-    ## drop too short audios
+    # Drop too short audios
     if len(audio_part2) / 48000 < 0.1:
         audio_part2 = None
         label_part2 = None
     
     return ( audio_part1, label_part1 ), ( audio_part2, label_part2 )
 
-def train_val_split( audio_list, label_list, val_ratio ):
-    
+def train_val_split(audio_list, label_list, val_ratio):
+    """Randomly split each audio/label into train and val segments by val_ratio.
+
+    Args:
+        audio_list: List of audio arrays.
+        label_list: List of label dicts.
+        val_ratio: Fraction of each file to use for validation (0..1).
+
+    Returns:
+        tuple: ((audio_list_train, label_list_train), (audio_list_val, label_list_val)).
+    """
     audio_list_train = []
     label_list_train = []
     audio_list_val = []
@@ -189,7 +206,17 @@ def train_val_split( audio_list, label_list, val_ratio ):
     
     return (audio_list_train, label_list_train), ( audio_list_val, label_list_val )
 
-def slice_audio_and_label( audio, label, total_spec_columns ):
+def slice_audio_and_label(audio, label, total_spec_columns):
+    """Slice one audio and labels into fixed-length clips with left padding.
+
+    Args:
+        audio: Audio samples.
+        label: Label dict.
+        total_spec_columns: Number of spectrogram columns per clip.
+
+    Returns:
+        tuple: (audio_clip_list, label_clip_list).
+    """
     sr = 48000
     clip_duration = total_spec_columns * 0.0025
     
@@ -204,11 +231,10 @@ def slice_audio_and_label( audio, label, total_spec_columns ):
     audio_clip_list = []
     label_clip_list = []
     for pos in range( 0, len(padded_audio), num_samples_in_clip ):
-        ## one clip contains 2 x clip_duration: the first clip_duration is the (left) padded audio part, 
-        ## and the second clip_duration is the main audio part
+        # One clip contains 2 x clip_duration: first part is left padding, second is main audio
         audio_clip = padded_audio[ pos:pos + 2 * num_samples_in_clip]  
 
-        ## drop too short audios
+        # Drop too short audios
         if len(audio_clip) / sr < 0.1:
             continue
         
@@ -232,7 +258,17 @@ def slice_audio_and_label( audio, label, total_spec_columns ):
     
     return audio_clip_list, label_clip_list
 
-def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
+def slice_audios_and_labels(audio_list, label_list, total_spec_columns):
+    """Slice all audios and labels into fixed-length clips.
+
+    Args:
+        audio_list: List of audio arrays.
+        label_list: List of label dicts.
+        total_spec_columns: Number of spectrogram columns per clip.
+
+    Returns:
+        tuple: (sliced_audio_list, sliced_label_list).
+    """
     sliced_audio_list, sliced_label_list = [], []
     for audio, label in zip( audio_list, label_list):
         sliced_audios, sliced_labels = slice_audio_and_label( audio, label, total_spec_columns )
@@ -243,7 +279,9 @@ def slice_audios_and_labels( audio_list, label_list, total_spec_columns ):
     return sliced_audio_list, sliced_label_list
 
 class VocalSegDataset(Dataset):
-    def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, species_codebook ):
+    """Dataset that yields (input_features, decoder_input_ids, labels) for WhisperSeg training."""
+
+    def __init__(self, audio_list, label_list, tokenizer, max_length, total_spec_columns, species_codebook):
         self.audio_list = audio_list
         self.label_list = label_list
         self.feature_extractor_bank = self.get_feature_extractor_bank( label_list )
@@ -252,7 +290,8 @@ class VocalSegDataset(Dataset):
         self.total_spec_columns = total_spec_columns
         self.species_codebook = species_codebook
         
-    def get_feature_extractor_bank(self, label_list ):
+    def get_feature_extractor_bank(self, label_list):
+        """Build a cache of WhisperSegFeatureExtractor by (sr, spec_time_step, min_frequency)."""
         feature_extractor_bank = {}
         for label in label_list:
             key = "%s-%s-%s"%( str( 48000 ), str(0.0025), str(0) )
@@ -260,7 +299,8 @@ class VocalSegDataset(Dataset):
                 feature_extractor_bank[key] = WhisperSegFeatureExtractor( 48000, 0.0025, 0 )
         return feature_extractor_bank
         
-    def map_time_to_spec_col_index(self, t, spec_time_step ):
+    def map_time_to_spec_col_index(self, t, spec_time_step):
+        """Map time in seconds to spectrogram column index."""
         return min( int(np.round( t/( spec_time_step * RATIO_DECODING_TIME_STEP_TO_SPEC_TIME_STEP ) )), self.total_spec_columns  )
         
     def __len__(self):

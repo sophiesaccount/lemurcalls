@@ -33,9 +33,9 @@ def count_files(path: str, name_filter: str) -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Count files with a specific name in a directory.")
-    parser.add_argument("-p", "--path", help="the directory path to search", required=True)
-    parser.add_argument("-f", "--name_filter", help="filter for the files to count", required=True)
+    parser.add_argument("-p", "--path", help="Directory path to search", required=True)
+    parser.add_argument("-f", "--name_filter", help="Glob filter for files to count (e.g. '*.wav')", required=True)
     args = parser.parse_args()
 
-    file_count = count_files(args.path, args.file_name)
-    print(f"Number of files named '{args.file_name}': {file_count}")
+    file_count = count_files(args.path, args.name_filter)
+    print(f"Number of files matching '{args.name_filter}': {file_count}")

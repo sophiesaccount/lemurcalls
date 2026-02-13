@@ -6,6 +6,7 @@ from common import get_flex_file_iterator
 
 
 def find(target, iterable):
+    """Return index of first occurrence of target in iterable, or iterate to end."""
     for i in range(len(iterable)):
         if iterable[i] == target:
             return i
@@ -21,6 +22,9 @@ def parse_slurm_files(log_path: str, from_id: int, to_id: int) -> None:
 
     Raises:
         ValueError: If the number of values found in a log file is not 6.
+
+    Returns:
+        None. Prints job_id and precision/recall/f1 for moan and vocal to stdout.
     """
     stats = []
     for log in get_flex_file_iterator(file_path=log_path, rglob_str='*.out'):

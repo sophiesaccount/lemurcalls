@@ -8,14 +8,14 @@ import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
 
 
-def confusion_matrix_framewise(prediction: np.ndarray, label: np.ndarray, time_per_frame_for_scoring = 0.01, name: str = None):
-    """Create a confusion matrix from frame-wise scores
+def confusion_matrix_framewise(prediction: np.ndarray, label: np.ndarray, time_per_frame_for_scoring=0.01, name: str = None):
+    """Create a confusion matrix from frame-wise scores and save as PNG.
 
     Args:
-        prediction (np.ndarray): Numpy array containing predictions
-        label (np.ndarray): Numpy array containing labels
-        time_per_frame_for_scoring (float, optional): Bin-size for frame-wise scoring. Defaults to 0.01.
-        name (str, optional): Used to pass job information so each job creates cms with unique names. Defaults to None.
+        prediction: Dict with onset, offset, cluster (predictions).
+        label: Dict with onset, offset, cluster (ground truth).
+        time_per_frame_for_scoring: Bin size for frame-wise scoring in seconds. Defaults to 0.01.
+        name: Optional job identifier for unique output filenames. Defaults to None (uses timestamp).
     """
     prediction_segments = prediction
     label_segments = label
