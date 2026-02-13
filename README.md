@@ -35,7 +35,7 @@ lemurcalls/
 ### 1. Clone and create environment
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/sophiesaccount/lemurcalls.git
 cd lemurcalls
 
 # Create a Python environment (conda/micromamba or venv)
