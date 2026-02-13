@@ -221,11 +221,20 @@ def plot_spectrogram_and_scores(
 
 # ==================== MODEL LOADING ====================
 
-def load_trained_whisperformer(checkpoint_path, num_classes, num_decoder_layers, num_head_layers, device):
+def load_trained_whisperformer(checkpoint_path, num_classes, device):
+    """Load a trained WhisperFormer, inferring architecture from the checkpoint."""
+    from ..model import infer_architecture_from_state_dict
+
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    if ckpt_num_classes is not None:
+        num_classes = ckpt_num_classes
+    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
+
     whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
     encoder = whisper_model.encoder
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers )
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model
@@ -335,8 +344,6 @@ if __name__ == "__main__":
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--num_decoder_layers", type = int, default = 3)
-    parser.add_argument("--num_head_layers", type = int, default = 2)
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--cutoff", type=int, default=200)
@@ -359,7 +366,7 @@ if __name__ == "__main__":
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.device)
+    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
     feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
