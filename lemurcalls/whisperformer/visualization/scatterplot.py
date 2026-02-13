@@ -9,7 +9,7 @@ import numpy as np
 
 from ..dataset import WhisperFormerDatasetQuality
 from ..model import WhisperFormer
-from transformers import WhisperModel, WhisperFeatureExtractor
+from transformers import WhisperModel, WhisperConfig, WhisperFeatureExtractor
 from ...datautils import (
     get_audio_and_label_paths_from_folders,
     load_data,
@@ -92,18 +92,48 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
 # ==================== MODEL LOADING ====================
 
 def load_trained_whisperformer(checkpoint_path, num_classes, device):
-    """Load a trained WhisperFormer, inferring architecture from the checkpoint."""
-    from ..model import infer_architecture_from_state_dict
+    """Load a trained WhisperFormer, inferring architecture and Whisper size from the checkpoint."""
+    from ..model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
 
     state_dict = torch.load(checkpoint_path, map_location=device)
+
+    # Infer architecture
     num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
     if ckpt_num_classes is not None:
         num_classes = ckpt_num_classes
-    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
 
-    whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
+    # Detect Whisper size
+    detected_size = detect_whisper_size_from_state_dict(state_dict)
+    if detected_size is None:
+        path_lower = checkpoint_path.lower()
+        detected_size = "large" if "large" in path_lower else "base"
+
+    print(f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
+          f"num_head_layers={num_head_layers}, num_classes={num_classes}")
+
+    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
+    config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
+
+    config = WhisperConfig.from_pretrained(config_path)
+    whisper_model = WhisperModel(config)
     encoder = whisper_model.encoder
+
     model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+
+    needs_remap = any(
+        k.startswith("encoder.") and not k.startswith("encoder.encoder.")
+        for k in state_dict.keys()
+    )
+    if needs_remap:
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("encoder.") and not k.startswith("encoder.encoder."):
+                new_state_dict["encoder." + k] = v
+            else:
+                new_state_dict[k] = v
+        state_dict = new_state_dict
+
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
