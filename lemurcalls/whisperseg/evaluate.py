@@ -52,12 +52,8 @@ def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_
         dict: Segment-wise and frame-wise scores (N-true-positive, precision, recall, F1).
     """
     audio_list, label_list = [], []
-    #audio_paths, label_paths = get_audio_and_label_paths(dataset_path)
-    if args.audio_folder and args.label_folder:
-        audio_paths, label_paths = get_audio_and_label_paths_from_folders(
-            args.audio_folder, args.label_folder)
-    else:
-        audio_paths, label_paths = get_audio_and_label_paths(args.train_dataset_folder)
+    audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+        audio_folder, label_folder)
     for audio_path, label_path in zip(audio_paths, label_paths):
         with open(label_path, 'r') as f:
             label = json.load(f)
@@ -66,7 +62,7 @@ def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_
         label_list.append(label) 
 
     segmenter = WhisperSegmenterFast(model_path = model_path,  device = "cpu")
-    if kwargs['identifier']:
+    if kwargs.get('identifier'):
         cm_name = raw_data_name = kwargs['identifier']
     else:
         cm_name = raw_data_name = None
