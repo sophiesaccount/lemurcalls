@@ -9,6 +9,9 @@ from lemurcalls.datautils import (
     slice_audios_and_labels,
 )
 from lemurcalls.whisperformer.datautils import get_codebook_for_classes
+from lemurcalls.whisperseg.datautils_ben import (
+    get_codebook_for_classes as get_codebook_for_classes_seg,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -206,3 +209,50 @@ class TestGetCodebookForClasses:
         for k, v in id_map.items():
             assert isinstance(k, int)
             assert isinstance(v, str)
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_codebook_for_classes (WhisperSeg variant)
+# ---------------------------------------------------------------------------
+
+class TestGetCodebookForClassesWhisperSeg:
+    """Tests for the WhisperSeg num_classes-dependent codebook factory."""
+
+    def test_three_classes_returns_three_distinct_ids(self):
+        codebook = get_codebook_for_classes_seg(3)
+        assert len(set(codebook.values())) == 3
+
+    def test_three_classes_codebook_values(self):
+        codebook = get_codebook_for_classes_seg(3)
+        assert codebook == {"m": 0, "t": 1, "w": 2, "lt": 1, "h": 1}
+
+    def test_one_class_maps_everything_to_zero(self):
+        codebook = get_codebook_for_classes_seg(1)
+        assert all(v == 0 for v in codebook.values())
+
+    def test_one_class_has_same_keys_as_three(self):
+        """Single-class codebook should know all the same cluster names."""
+        cb1 = get_codebook_for_classes_seg(1)
+        cb3 = get_codebook_for_classes_seg(3)
+        assert set(cb1.keys()) == set(cb3.keys())
+
+    def test_unsupported_value_raises_error(self):
+        with pytest.raises(ValueError, match="not supported"):
+            get_codebook_for_classes_seg(2)
+
+    def test_unsupported_zero_raises_error(self):
+        with pytest.raises(ValueError, match="not supported"):
+            get_codebook_for_classes_seg(0)
+
+    def test_codebooks_consistent_between_whisperformer_and_whisperseg(self):
+        """Both variants should produce the same cluster_codebook for classes=3."""
+        cb_former, _ = get_codebook_for_classes(3)
+        cb_seg = get_codebook_for_classes_seg(3)
+        assert cb_former == cb_seg
+
+    def test_return_type_is_dict(self):
+        codebook = get_codebook_for_classes_seg(3)
+        assert isinstance(codebook, dict)
+        for k, v in codebook.items():
+            assert isinstance(k, str)
+            assert isinstance(v, int)
