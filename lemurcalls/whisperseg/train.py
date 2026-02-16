@@ -152,11 +152,6 @@ if __name__ == "__main__":
     parser.add_argument("--label_folder" )
     parser.add_argument("--n_device", type = int, default = 1 )
     parser.add_argument("--gpu_list", type = int, nargs = "+", default = None )
-    parser.add_argument("--project", default = "wseg-lemur" )
-    parser.add_argument("--run_name", default = None )
-    parser.add_argument("--run_notes", default = None )
-    parser.add_argument("--run_tags", default = None, nargs='+')
-    parser.add_argument("--wandb_dir", default=None)
     parser.add_argument("--update_every", type = int, default = 100 )
     parser.add_argument("--validate_every", type = int, default = None )
     parser.add_argument("--validate_per_epoch", type = int, default = 0 )
@@ -185,22 +180,7 @@ if __name__ == "__main__":
                              "If not set, the codebook is built dynamically from training labels.")
     
     args = parser.parse_args()
-    """
-    wandb.init(
-        project=args.project,
-        name=args.run_name,
-        notes=args.run_notes,
-        tags=args.run_tags,
-        dir=args.wandb_dir,
-    )
-    wandb.define_metric("current_step")
-    wandb.define_metric( "epoch", step_metric="current_step")
-    wandb.define_metric( "train/loss", step_metric="current_step")
-    wandb.define_metric( "train/learning_rate", step_metric="current_step")
-    wandb.define_metric( "validate/score", step_metric="current_step")
-    wandb.define_metric( "validate/segment_score", step_metric="current_step")
-    wandb.define_metric( "validate/frame_score", step_metric="current_step")
-    """
+
     if args.seed is not None:
         np.random.seed(args.seed)  
         
@@ -333,17 +313,6 @@ if __name__ == "__main__":
             current_step += 1
 
             if args.update_every > 0 and current_step % args.update_every == 0:
-                """
-                wandb.log(
-                    {
-                        "current_step":current_step,
-                        "train/learning_rate":get_lr(optimizer)[0],
-                        "train/loss":np.mean(training_loss_value_list),
-                        "epoch": epoch + count / len(training_dataloader)
-                    }
-                )
-                """
-                
                 training_loss_value_list = [] 
 
             if ( args.validate_every is not None and current_step % args.validate_every == 0 ) or \
@@ -351,16 +320,6 @@ if __name__ == "__main__":
                 model.eval()
                 ## in the validation set, set the num_trails to 1
                 eval_res = evaluate( audio_list_val, label_list_val, segmenter, args.batch_size, args.max_length, num_trials =1, consolidation_method = None, num_beams=1, target_cluster = None )
-                """
-                wandb.log(
-                    {
-                        "current_step":current_step,
-                        "validate/score": ( eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1] ) * 0.5,
-                        "validate/segment_score": eval_res["segment_wise"][-1],
-                        "validate/frame_score": eval_res["frame_wise"][-1]
-                    }
-                )    
-                """
                 val_score_history.append( ( current_step, ( eval_res["segment_wise"][-1] + eval_res["frame_wise"][-1] ) * 0.5 ) )
                 early_stop = esh.check(val_score_history[-1][1]) if len(val_score_history) > 0 else False
                 model.train()

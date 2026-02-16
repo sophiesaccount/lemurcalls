@@ -810,22 +810,11 @@ if __name__ == "__main__":
     parser.add_argument("--audio_folder" )
     parser.add_argument("--label_folder" )
     parser.add_argument("--label_folder_val" )
-    parser.add_argument("--audio_folder_val" )
     parser.add_argument("--n_device", type = int, default = 1 )
     parser.add_argument("--gpu_list", type = int, nargs = "+", default = None )
-    parser.add_argument("--project", default = "wseg-lemur" )
-    parser.add_argument("--run_name", default = None )
-    parser.add_argument("--run_notes", default = None )
-    parser.add_argument("--run_tags", default = None, nargs='+')
-    parser.add_argument("--update_every", type = int, default = 100 )
-    parser.add_argument("--validate_every", type = int, default = None )
-    parser.add_argument("--validate_per_epoch", type = int, default = 0 )
-    parser.add_argument("--save_every", type = int, default = None )
-    parser.add_argument("--save_per_epoch", type = int, default = 0 )
     parser.add_argument("--max_num_epochs", type = int, default = 40 )
     parser.add_argument("--max_num_iterations", type = int, default = None )
     parser.add_argument("--val_ratio", type = float, default = 0 )
-    parser.add_argument("--make_equal", nargs="+", default = None )
     parser.add_argument("--use_early_stopping", action="store_true",               
     help="Aktiviere Early Stopping basierend auf Validierungs-F1.")
     parser.add_argument("--num_decoder_layers", type = int, default = 3)
@@ -845,13 +834,11 @@ if __name__ == "__main__":
     parser.add_argument("--scheduler_patience", type = int, default = 2)
     parser.add_argument("--factor", type = int, default = 0.3)
     parser.add_argument("--train_loss_weight", type = float, default = 1)
-    parser.add_argument("--no_decoder", type = bool, default = False)
     parser.add_argument("--T_max", type = int, default = None)
     parser.add_argument("--eta_min", type = float, default = 1e-6)
     parser.add_argument("--thresholds", type=float, nargs="+", default=[0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85])   
     parser.add_argument("--iou_threshold", type = float, default = 0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
-    parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
     parser.add_argument("--low_quality_value", type=float, default=0.3)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
@@ -863,10 +850,6 @@ if __name__ == "__main__":
 
     if args.seed is not None:
         np.random.seed(args.seed)  
-        
-    if args.val_ratio == 0.0 and not args.label_folder_val:
-        args.validate_every = None
-        args.validate_per_epoch= None
 
     create_if_not_exists(args.model_folder)
 
