@@ -210,6 +210,51 @@ ID_TO_CLUSTER = {
     2: "w",   
 }
 
+
+def get_codebook_for_classes(num_classes):
+    """Return (cluster_codebook, id_to_cluster) based on the number of classes.
+
+    Args:
+        num_classes: 3 for the standard 3-class codebook (m/t/w),
+                     1 to map everything to a single 'moan' class.
+
+    Returns:
+        Tuple of (cluster_codebook, id_to_cluster).
+
+    Raises:
+        ValueError: If num_classes is not 1 or 3.
+    """
+    if num_classes == 3:
+        cluster_codebook = {
+            "m": 0,
+            "t": 1,
+            "w": 2,
+            "lt": 1,
+            "h": 1,
+        }
+        id_to_cluster = {
+            0: "m",
+            1: "h",
+            2: "w",
+        }
+    elif num_classes == 1:
+        cluster_codebook = {
+            "m": 0,
+            "t": 0,
+            "w": 0,
+            "lt": 0,
+            "h": 0,
+        }
+        id_to_cluster = {
+            0: "m",
+        }
+    else:
+        raise ValueError(
+            f"num_classes={num_classes} is not supported. "
+            f"Use 3 for multi-class (m/h/w) or 1 for single-class (moan)."
+        )
+    return cluster_codebook, id_to_cluster
+
 def load_audio_and_label(audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook):
     """Load audio and labels for a chunk of paths; store results in audio_dict[label_dict] by thread_id."""
     local_audio_list = []

@@ -14,7 +14,8 @@ from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 from ..datautils import (get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        load_data,
-                       slice_audios_and_labels, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER)
+                       slice_audios_and_labels, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER,
+                       get_codebook_for_classes)
 
 from ..util.common import is_scheduled_job
 from ..utils import *
@@ -898,13 +899,15 @@ if __name__ == "__main__":
         audio_path_list_train, label_path_list_train = audio_path_list_train, label_path_list_train
         audio_path_list_val, label_path_list_val = [], []
 
-    cluster_codebook = FIXED_CLUSTER_CODEBOOK
+    cluster_codebook, id_to_cluster = get_codebook_for_classes(args.num_classes)
+    print(f"Using codebook for {args.num_classes} class(es): {cluster_codebook}")
+    print(f"ID to cluster mapping: {id_to_cluster}")
 
     audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 1 )
     if args.class_weights == True:
         class_weights, counts = compute_class_weights_from_label_list(
             label_list_train,
-            FIXED_CLUSTER_CODEBOOK
+            cluster_codebook
         )
     else:
         class_weights=None
@@ -938,7 +941,7 @@ if __name__ == "__main__":
                 labels = json.load(f)
             
             clusters = labels["cluster"]
-            labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
+            labels["cluster"] = [id_to_cluster[cluster_codebook[c]] for c in clusters]
             
 
             # add quality classes
@@ -981,7 +984,7 @@ if __name__ == "__main__":
                 labels = json.load(f)
             
             clusters = labels["cluster"]
-            labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
+            labels["cluster"] = [id_to_cluster[cluster_codebook[c]] for c in clusters]
             
 
             # add quality classes
@@ -1138,7 +1141,7 @@ if __name__ == "__main__":
             f1s, recalls, precisions = [], [], []
             thresholds = args.thresholds
             final_preds = actionformer_validation_f1_allclasses(model, val_dataloader, device, args.iou_threshold, cluster_codebook, args.total_spec_columns, feature_extractor,
-            args.num_classes, args.low_quality_value, args.batch_size, args.num_workers, collate_fn, ID_TO_CLUSTER, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val)
+            args.num_classes, args.low_quality_value, args.batch_size, args.num_workers, collate_fn, id_to_cluster, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val)
             for threshold in thresholds:
                 results = evaluate(final_preds, threshold, args.overlap_tolerance, args.allowed_qualities, all_labels, metadata_list_val, model)
                 pp = results["pp_total"]
