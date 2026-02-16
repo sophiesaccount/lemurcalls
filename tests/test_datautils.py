@@ -8,6 +8,7 @@ from lemurcalls.datautils import (
     ID_TO_CLUSTER,
     slice_audios_and_labels,
 )
+from lemurcalls.whisperformer.datautils import get_codebook_for_classes
 
 
 # ---------------------------------------------------------------------------
@@ -142,3 +143,66 @@ def test_slice_short_audio_single_segment():
 
     # 3000 cols * 0.01 s/col = 30 s clip; 2 s audio < 30 s -> 1 segment
     assert len(audios) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_codebook_for_classes
+# ---------------------------------------------------------------------------
+
+class TestGetCodebookForClasses:
+    """Tests for the num_classes-dependent codebook factory."""
+
+    def test_three_classes_returns_three_distinct_ids(self):
+        codebook, id_map = get_codebook_for_classes(3)
+        assert len(set(codebook.values())) == 3
+        assert set(id_map.keys()) == {0, 1, 2}
+
+    def test_three_classes_codebook_matches_fixed(self):
+        """classes=3 should reproduce the original FIXED_CLUSTER_CODEBOOK."""
+        codebook, _ = get_codebook_for_classes(3)
+        assert codebook == {"m": 0, "t": 1, "w": 2, "lt": 1, "h": 1}
+
+    def test_three_classes_id_map_covers_all_codebook_values(self):
+        codebook, id_map = get_codebook_for_classes(3)
+        for cluster_name, cid in codebook.items():
+            assert cid in id_map, (
+                f"class id {cid} (from '{cluster_name}') missing in id_to_cluster"
+            )
+
+    def test_one_class_maps_everything_to_zero(self):
+        codebook, id_map = get_codebook_for_classes(1)
+        assert all(v == 0 for v in codebook.values())
+        assert set(id_map.keys()) == {0}
+
+    def test_one_class_has_same_keys_as_three(self):
+        """Single-class codebook should still know all cluster names."""
+        cb1, _ = get_codebook_for_classes(1)
+        cb3, _ = get_codebook_for_classes(3)
+        assert set(cb1.keys()) == set(cb3.keys())
+
+    def test_one_class_id_map_returns_moan(self):
+        _, id_map = get_codebook_for_classes(1)
+        assert id_map[0] == "m"
+
+    def test_unsupported_value_raises_error(self):
+        with pytest.raises(ValueError, match="not supported"):
+            get_codebook_for_classes(2)
+
+    def test_unsupported_zero_raises_error(self):
+        with pytest.raises(ValueError, match="not supported"):
+            get_codebook_for_classes(0)
+
+    def test_unsupported_negative_raises_error(self):
+        with pytest.raises(ValueError, match="not supported"):
+            get_codebook_for_classes(-1)
+
+    def test_return_types(self):
+        codebook, id_map = get_codebook_for_classes(3)
+        assert isinstance(codebook, dict)
+        assert isinstance(id_map, dict)
+        for k, v in codebook.items():
+            assert isinstance(k, str)
+            assert isinstance(v, int)
+        for k, v in id_map.items():
+            assert isinstance(k, int)
+            assert isinstance(v, str)
