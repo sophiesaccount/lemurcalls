@@ -17,7 +17,8 @@ from transformers import get_linear_schedule_with_warmup
 from ..convert_hf_to_ct2 import convert_hf_to_ct2
 from .datautils_ben import (VocalSegDataset, get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        get_cluster_codebook, load_data,
-                       slice_audios_and_labels, train_val_split)
+                       slice_audios_and_labels, train_val_split,
+                       get_codebook_for_classes)
 from .model import WhisperSegmenterForEval, load_model, save_model
 from ..util.common import EarlyStopHandler, is_scheduled_job
 from ..util.confusion_framewise import confusion_matrix_framewise
@@ -179,6 +180,9 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type = float, default = 0.0 )
     parser.add_argument("--num_workers", type = int, default = 4 )
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
+    parser.add_argument("--num_classes", type = int, default = None,
+                        help="Number of output classes. 1 = single-class (moan), 3 = multi-class (m/h/w). "
+                             "If not set, the codebook is built dynamically from training labels.")
     
     args = parser.parse_args()
     """
@@ -246,7 +250,12 @@ if __name__ == "__main__":
     else:
         audio_path_list_train, label_path_list_train = get_audio_and_label_paths(args.train_dataset_folder)
 
-    cluster_codebook = get_cluster_codebook( label_path_list_train, segmenter.cluster_codebook )
+    if args.num_classes is not None:
+        cluster_codebook = get_codebook_for_classes(args.num_classes)
+        print(f"Using fixed codebook for {args.num_classes} class(es): {cluster_codebook}")
+    else:
+        cluster_codebook = get_cluster_codebook( label_path_list_train, segmenter.cluster_codebook )
+        print(f"Built dynamic codebook from labels: {cluster_codebook}")
     segmenter.update_cluster_codebook( cluster_codebook )
 
     audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 20 )

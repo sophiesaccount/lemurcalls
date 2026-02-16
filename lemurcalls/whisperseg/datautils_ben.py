@@ -62,15 +62,41 @@ def get_cluster_codebook( label_paths, initial_cluster_codebook ):
             cluster_codebook[cluster] = len(cluster_codebook)
     return cluster_codebook
 
-merge_map = {
-    "m": 'm',   
-    "t": 'm',   
-    "w": 'm',   
-    "lt": 'm',
-    "h":'m'
-}
+def get_codebook_for_classes(num_classes):
+    """Return cluster_codebook for WhisperSeg based on num_classes.
 
-def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook , merge_map=merge_map):
+    Args:
+        num_classes: 3 for multi-class (m/h/w), 1 for single-class (moan).
+
+    Returns:
+        cluster_codebook dict mapping cluster names to class IDs.
+
+    Raises:
+        ValueError: If num_classes is not 1 or 3.
+    """
+    if num_classes == 3:
+        return {
+            "m": 0,
+            "t": 1,
+            "w": 2,
+            "lt": 1,
+            "h": 1,
+        }
+    elif num_classes == 1:
+        return {
+            "m": 0,
+            "t": 0,
+            "w": 0,
+            "lt": 0,
+            "h": 0,
+        }
+    else:
+        raise ValueError(
+            f"num_classes={num_classes} is not supported. "
+            f"Use 3 for multi-class (m/h/w) or 1 for single-class (moan)."
+        )
+
+def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dict, label_dict, cluster_codebook ):
     local_audio_list = []
     local_label_list = []
     
@@ -90,9 +116,6 @@ def load_audio_and_label( audio_path_list, label_path_list, thread_id, audio_dic
         offset_arr[ offset_arr > len(y)/48000 ] = len(y)/48000
 
         label["cluster"] = [ label["cluster"][idx] for idx in np.argwhere(valid_indices)[:,0] ]    
-           
-        if merge_map is not None:
-            label["cluster"] = [merge_map.get(c, c) for c in label["cluster"]]
 
         cluster_id_arr = np.array( [ cluster_codebook[ value ] for value in label["cluster"] ]  )
         
