@@ -176,6 +176,9 @@ whisper_models/
 scripts/
 whisper_size/
 segments.pt
+checkpoints/
+*.pth
+*.bin
 
 #final_checkpoint_ct2/
 
