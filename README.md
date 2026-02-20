@@ -22,8 +22,9 @@ lemurcalls/
 │   │   ├── postprocessing/  # Post-processing & filtering
 │   │   └── visualization/   # Scatter plots, confusion matrices
 │   ├── util/                # Shared utilities (data processing, annotation tools)
-│   ├── datautils.py         # Audio/label loading and slicing
-│   ├── convert_hf_to_ct2.py # HuggingFace to CTranslate2 conversion
+│   ├── datautils.py             # Audio/label loading and slicing
+│   ├── visualize_predictions.py # Plot spectrograms, scores, GT & predictions
+│   ├── convert_hf_to_ct2.py    # HuggingFace to CTranslate2 conversion
 │   └── ...
 ├── tests/                   # Unit tests
 ├── pyproject.toml           # Package configuration & dependencies
@@ -173,10 +174,49 @@ python -m lemurcalls.whisperformer.infer \
 python -m lemurcalls.whisperformer.infer --checkpoint_path /projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder_new/final_model_20251205_030535/best_model.pth --audio_folder /mnt/lustre-grete/usr/u17327/final/audios_test --label_folder /mnt/lustre-grete/usr/u17327/final/jsons_test --output_dir /projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder_new/final_model_20251205_030535/sc --batch_size 4 --iou_threshold 0.4
 ```
 
+### Visualize predictions
+
+Generate per-segment plots showing the mel spectrogram, per-class model scores, ground truth labels (with quality annotations), and optionally extra labels (e.g. WhisperSeg predictions) for comparison.
+
+```bash
+python -m lemurcalls.visualize_predictions \
+    --checkpoint_path <checkpoint> \
+    --audio_folder <audio_dir> \
+    --label_folder <gt_label_dir> \
+    --pred_label_folder <whisperformer_pred_dir> \
+    --output_dir <output_dir> \
+    --threshold 0.35
+```
+
+To include a second set of predictions (e.g. from WhisperSeg) as an additional row:
+
+```bash
+python -m lemurcalls.visualize_predictions \
+    --checkpoint_path <checkpoint> \
+    --audio_folder <audio_dir> \
+    --label_folder <gt_label_dir> \
+    --pred_label_folder <whisperformer_pred_dir> \
+    --extra_label_folder <whisperseg_pred_dir> \
+    --output_dir <output_dir>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `--checkpoint_path` | yes | Path to the trained WhisperFormer `.pth` checkpoint |
+| `--audio_folder` | yes | Directory with `.wav` files |
+| `--label_folder` | yes | Directory with ground truth `.json` labels |
+| `--pred_label_folder` | yes | Directory with WhisperFormer prediction `.json` files |
+| `--extra_label_folder` | no | Directory with additional prediction `.json` files (e.g. WhisperSeg) |
+| `--output_dir` | no | Output directory for plots (default: `inference_outputs`) |
+| `--threshold` | no | Score threshold (default: 0.35) |
+| `--whisper_size` | no | `base` or `large` (auto-detected from checkpoint if omitted) |
+
+The first 3 segments of each audio file are plotted and saved as `.png` files in a timestamped subdirectory.
+
 ### Filter results by SNR and maximale amplitude (recommended)
 ```bash
-python -m lemurcalls.whisperformer.postprocessing.filter_labels_by_snr.py \
-    --audio_folder <audio_dir> \
+python -m lemurcalls.whisperformer.postprocessing.filter_labels_by_snr\
+    --audio_folder <audio_dir>
     --label_folder <label_dir> \
     --output_dir <output_dir> \
     --snr_threshold <-1> \
