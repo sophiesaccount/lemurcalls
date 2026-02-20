@@ -21,6 +21,31 @@ from ..datautils import (
 from .train import collate_fn, run_inference_new
 
 
+def _get_audio_paths(audio_folder):
+    """List all WAV files in a folder (no label matching needed)."""
+    return sorted([
+        os.path.join(audio_folder, f)
+        for f in os.listdir(audio_folder)
+        if f.lower().endswith(".wav")
+    ])
+
+
+def _load_audio_only(audio_path, cluster_codebook):
+    """Load a single audio file and create an empty dummy label dict."""
+    import librosa
+    y, _ = librosa.load(audio_path, sr=16000)
+    y = y.astype(np.float32)
+    label = {
+        "onset": np.array([], dtype=np.float64),
+        "offset": np.array([], dtype=np.float64),
+        "cluster": [],
+        "cluster_id": np.array([], dtype=np.int64),
+        "quality": np.array([], dtype=object),
+        "sr": 16000,
+    }
+    return [y], [label]
+
+
 def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_columns=2000, offset=0):
 
     """
@@ -281,7 +306,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", required=True)
     parser.add_argument("--audio_folder", required=True)
-    parser.add_argument("--label_folder", required=True)
+    parser.add_argument("--label_folder", default=None,
+                        help="Label folder (optional). If omitted, only audio files are needed.")
     parser.add_argument("--output_dir", default="inference_outputs")
     parser.add_argument("--total_spec_columns", type=int, default=3000)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -308,9 +334,14 @@ if __name__ == "__main__":
         json.dump(vars(args), f, indent=2)
 
 
-    audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
+
+    if args.label_folder is not None:
+        audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    else:
+        audio_paths = _get_audio_paths(args.audio_folder)
+        label_paths = [None] * len(audio_paths)
 
     # Modell laden und Whisper-Größe erkennen
     model, detected_whisper_size = load_trained_whisperformer(
@@ -332,7 +363,10 @@ if __name__ == "__main__":
     all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
     for audio_path, label_path in zip(audio_paths, label_paths):
         print(f"\n===== Processing {os.path.basename(audio_path)} =====")
-        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
+        if label_path is not None:
+            audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
+        else:
+            audio_list, label_list = _load_audio_only(audio_path, cluster_codebook)
         # ======= Drei Slicing-Durchläufe mit Offsets =======
         shift_offsets = [0, 1000, 2000]
         all_preds_runs = []
