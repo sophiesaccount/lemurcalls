@@ -169,6 +169,9 @@ python -m lemurcalls.whisperformer.infer \
     --num_classes <n> \
     --whisper_size base
 ```
+```bash
+python -m lemurcalls.whisperformer.infer --checkpoint_path /projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder_new/final_model_20251205_030535/best_model.pth --audio_folder /mnt/lustre-grete/usr/u17327/final/audios_test --label_folder /mnt/lustre-grete/usr/u17327/final/jsons_test --output_dir /projects/extern/CIDAS/cidas_digitalisierung_lehre/mthesis_sophie_dierks/dir.project/lemurcalls/lemurcalls/model_folder_new/final_model_20251205_030535/sc --batch_size 4 --iou_threshold 0.4
+```
 
 ### Filter results by SNR and maximale amplitude (recommended)
 ```bash
