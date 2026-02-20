@@ -12,7 +12,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
-from ..datautils import (get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
+from .datautils import (get_audio_and_label_paths, get_audio_and_label_paths_from_folders,
                        load_data,
                        slice_audios_and_labels, FIXED_CLUSTER_CODEBOOK, ID_TO_CLUSTER,
                        get_codebook_for_classes)
