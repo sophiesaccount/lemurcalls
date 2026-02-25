@@ -109,7 +109,26 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
     return new_audios, new_labels, new_metadata
 
 
-def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
+def _resolve_hf_whisper_model_id(whisper_size, whisper_model_id=None):
+    """Return Hugging Face model id (explicit id wins over size-based default)."""
+    if whisper_model_id:
+        return whisper_model_id
+    if whisper_size not in ["base", "large"]:
+        raise ValueError(
+            "For Hugging Face loading, whisper_size must be 'base' or 'large' "
+            "when whisper_model_id is not provided."
+        )
+    return f"openai/whisper-{whisper_size}"
+
+
+def load_trained_whisperformer(
+    checkpoint_path,
+    num_classes,
+    device,
+    whisper_size=None,
+    whisper_load_source="local",
+    whisper_model_id=None,
+):
     """Load a trained WhisperFormer model from checkpoint.
 
     Architecture parameters (num_decoder_layers, num_head_layers, num_classes)
@@ -148,11 +167,16 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
     print(f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
           f"num_head_layers={num_head_layers}, num_classes={num_classes}")
 
-    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
-    config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
-    
-    config = WhisperConfig.from_pretrained(config_path)
+    if whisper_load_source == "local":
+        _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        _whisper_models_dir = os.path.join(_project_root, "whisper_models")
+        config_source = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
+    elif whisper_load_source == "hf":
+        config_source = _resolve_hf_whisper_model_id(detected_size, whisper_model_id)
+    else:
+        raise ValueError("whisper_load_source must be 'local' or 'hf'.")
+
+    config = WhisperConfig.from_pretrained(config_source)
     whisper_model = WhisperModel(config)
     encoder = whisper_model.encoder
     
@@ -323,6 +347,19 @@ if __name__ == "__main__":
     parser.add_argument("--centerframe_size", type=float, default=0.6)
     parser.add_argument("--whisper_size", type=str, default=None, 
                         help="Whisper model size: 'base' or 'large'. If not specified, will be auto-detected from checkpoint path.")
+    parser.add_argument(
+        "--whisper_load_source",
+        type=str,
+        default="local",
+        choices=["local", "hf"],
+        help="Load Whisper config/feature extractor from local whisper_models or Hugging Face.",
+    )
+    parser.add_argument(
+        "--whisper_model_id",
+        type=str,
+        default=None,
+        help="Optional Hugging Face model id (e.g., openai/whisper-base). Used when --whisper_load_source hf.",
+    )
 
     args = parser.parse_args()
 
@@ -348,16 +385,23 @@ if __name__ == "__main__":
         args.checkpoint_path, 
         args.num_classes, 
         args.device,
-        whisper_size=args.whisper_size
+        whisper_size=args.whisper_size,
+        whisper_load_source=args.whisper_load_source,
+        whisper_model_id=args.whisper_model_id,
     )
     
-    # Feature Extractor laden (identisch bei allen Whisper-Groessen: 80 Mel-Bins, 16kHz)
-    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    _whisper_models_dir = os.path.join(_project_root, "whisper_models")
-    feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        os.path.join(_whisper_models_dir, "whisper_base"),
-        local_files_only=True
-    )
+    # Feature extractor loading: local files or Hugging Face
+    if args.whisper_load_source == "local":
+        _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        _whisper_models_dir = os.path.join(_project_root, "whisper_models")
+        feature_source = os.path.join(_whisper_models_dir, f"whisper_{detected_whisper_size}")
+        feature_extractor = WhisperFeatureExtractor.from_pretrained(
+            feature_source,
+            local_files_only=True,
+        )
+    else:
+        hf_model_id = _resolve_hf_whisper_model_id(detected_whisper_size, args.whisper_model_id)
+        feature_extractor = WhisperFeatureExtractor.from_pretrained(hf_model_id)
 
 
     all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
