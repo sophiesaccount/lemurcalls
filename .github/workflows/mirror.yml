@@ -3,15 +3,21 @@ name: Mirror to GitLab
 on:
   push:
     branches:
-      - main   # ggf. anpassen (master?)
+      - main
+      - application-notebooks
+  workflow_dispatch:
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Push to GitLab
         run: |
+          test -n "${{ secrets.GITLAB_TOKEN }}" || { echo "GITLAB_TOKEN is missing"; exit 1; }
           git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/s.dierks/lemurcalls.git
+          git remote -v
           git push --mirror gitlab
