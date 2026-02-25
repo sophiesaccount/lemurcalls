@@ -39,7 +39,7 @@ lemurcalls/
 git clone https://github.com/sophiesaccount/lemurcalls.git
 cd lemurcalls
 
-# Create a Python environment (conda/micromamba or venv)
+# Create a Python environment (conda/micromamba or venv) with python 11 or 12
 python -m venv .venv
 
 # And activate
