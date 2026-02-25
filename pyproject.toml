@@ -23,6 +23,7 @@ dependencies = [
     # Visualization
     "matplotlib>=3.8",
     "ipywidgets>=8.0",
+    "seaborn>=0.13"
     # Utilities
     "tqdm>=4.60",
     "pillow>=10.0",
