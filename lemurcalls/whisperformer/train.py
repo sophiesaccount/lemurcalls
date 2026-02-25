@@ -575,13 +575,35 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 _WHISPER_MODELS_DIR = os.path.join(_PROJECT_ROOT, "whisper_models")
 
 
-def load_actionformer_model(whisper_size, initial_model_path, num_classes, num_decoder_layers, num_head_layers, dropout):
+def _resolve_whisper_source(whisper_size, whisper_load_source, whisper_model_id=None):
+    """Resolve local path or Hugging Face model id for Whisper assets."""
+    if whisper_load_source == "local":
+        whisper_path = os.path.join(_WHISPER_MODELS_DIR, f"whisper_{whisper_size}")
+        if not os.path.isdir(whisper_path):
+            raise ValueError(f"Whisper model not found at {whisper_path}")
+        return whisper_path
+    if whisper_load_source == "hf":
+        return whisper_model_id or f"openai/whisper-{whisper_size}"
+    raise ValueError("whisper_load_source must be 'local' or 'hf'.")
+
+
+def load_actionformer_model(
+    whisper_size,
+    initial_model_path,
+    num_classes,
+    num_decoder_layers,
+    num_head_layers,
+    dropout,
+    whisper_load_source="local",
+    whisper_model_id=None,
+):
     """Load ActionFormer model with Whisper encoder"""
     
-    whisper_path = os.path.join(_WHISPER_MODELS_DIR, f"whisper_{whisper_size}")
-    if not os.path.isdir(whisper_path):
-        raise ValueError(f"Whisper model not found at {whisper_path}")
-    whisper_model = WhisperModel.from_pretrained(whisper_path)
+    whisper_source = _resolve_whisper_source(whisper_size, whisper_load_source, whisper_model_id)
+    whisper_model = WhisperModel.from_pretrained(
+        whisper_source,
+        local_files_only=(whisper_load_source == "local"),
+    )
 
     encoder = whisper_model.encoder
     
@@ -845,6 +867,19 @@ if __name__ == "__main__":
     parser.add_argument("--allowed_qualities", nargs='+', type=int, default=[1,2,3])
     parser.add_argument("--class_weights", type = bool, default = False)
     parser.add_argument("--whisper_size", default = "base")
+    parser.add_argument(
+        "--whisper_load_source",
+        type=str,
+        default="local",
+        choices=["local", "hf"],
+        help="Load Whisper encoder/feature extractor from local whisper_models or Hugging Face.",
+    )
+    parser.add_argument(
+        "--whisper_model_id",
+        type=str,
+        default=None,
+        help="Optional Hugging Face model id (e.g., openai/whisper-base). Used when --whisper_load_source hf.",
+    )
 
     args = parser.parse_args()
 
@@ -858,7 +893,16 @@ if __name__ == "__main__":
         
     device = torch.device(  "cuda:%d"%( args.gpu_list[0] ) if torch.cuda.is_available() else "cpu" )
 
-    model = load_actionformer_model(args.whisper_size, args.initial_model_path, args.num_classes, args.num_decoder_layers, args.num_head_layers, args.dropout)
+    model = load_actionformer_model(
+        args.whisper_size,
+        args.initial_model_path,
+        args.num_classes,
+        args.num_decoder_layers,
+        args.num_head_layers,
+        args.dropout,
+        whisper_load_source=args.whisper_load_source,
+        whisper_model_id=args.whisper_model_id,
+    )
     
     if args.freeze_encoder:
         for para in model.encoder.parameters():
@@ -899,10 +943,15 @@ if __name__ == "__main__":
     audio_list_train, label_list_train, metadata_list = slice_audios_and_labels( audio_list_train, label_list_train, args.total_spec_columns )
     print(f"Created {len(audio_list_train)} training samples after slicing") 
 
-    whisper_path = os.path.join(_WHISPER_MODELS_DIR, f"whisper_{args.whisper_size}")
-    if not os.path.isdir(whisper_path):
-        raise ValueError(f"Whisper model not found at {whisper_path}")
-    feature_extractor = WhisperFeatureExtractor.from_pretrained(whisper_path, local_files_only=True)
+    whisper_source = _resolve_whisper_source(
+        args.whisper_size,
+        args.whisper_load_source,
+        args.whisper_model_id,
+    )
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(
+        whisper_source,
+        local_files_only=(args.whisper_load_source == "local"),
+    )
 
 
     if args.val_ratio > 0:
