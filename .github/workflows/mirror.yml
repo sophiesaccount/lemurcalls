@@ -17,7 +17,8 @@ jobs:
 
       - name: Push to GitLab
         run: |
+          test -n "${{ secrets.GITLAB_USER }}" || { echo "GITLAB_USER is missing"; exit 1; }
           test -n "${{ secrets.GITLAB_TOKEN_NEW }}" || { echo "GITLAB_TOKEN_NEW is missing"; exit 1; }
-          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN_NEW }}@gitlab.com/s.dierks/lemurcalls.git
+          git remote add gitlab https://${{ secrets.GITLAB_USER }}:${{ secrets.GITLAB_TOKEN_NEW }}@gitlab.com/s.dierks/lemurcalls.git
           git remote -v
           git push --mirror gitlab
