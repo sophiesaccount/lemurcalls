@@ -31,4 +31,7 @@ jobs:
             git remote add gitlab https://oauth2:$TOKEN@gitlab.gwdg.de/s.dierks/lemurcalls.git
           fi
           git remote -v
-          git push --mirror gitlab
+          git fetch origin --prune
+          git update-ref -d refs/remotes/origin/HEAD || true
+          git push gitlab 'refs/remotes/origin/*:refs/heads/*'
+          git push gitlab 'refs/tags/*:refs/tags/*'
