@@ -15,15 +15,27 @@ def json_to_raven_selection_table(json_path, output_path):
         raise ValueError(f"JSON {json_path} is missing keys: {missing}")
 
     # Construct DataFrame
-    df = pd.DataFrame({
+    data = {
         "Selection": range(1, len(predictions["onset"]) + 1),
         "View": ["-"] * len(predictions["onset"]),
         "Channel": [1] * len(predictions["onset"]),
         "Begin Time (s)": predictions["onset"],
         "End Time (s)": predictions["offset"],
         "Cluster": predictions["cluster"],
-        #"Score": predictions["score"]
-    })
+    }
+
+    # Add score only if available and compatible
+    has_score = "score" in predictions and predictions["score"] is not None
+    if has_score:
+        if len(predictions["score"]) == len(predictions["onset"]):
+            data["Score"] = predictions["score"]
+        else:
+            print(
+                f"⚠️ Score column skipped for {json_path}: "
+                f"len(score)={len(predictions['score'])} != len(onset)={len(predictions['onset'])}"
+            )
+
+    df = pd.DataFrame(data)
 
     # Save as tab-delimited .txt, which Raven expects
     df.to_csv(output_path, sep="\t", index=False)
