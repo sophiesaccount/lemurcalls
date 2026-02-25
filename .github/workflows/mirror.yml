@@ -25,10 +25,10 @@ jobs:
 
           if [ -n "${{ secrets.GITLAB_USER }}" ]; then
             echo "Using GITLAB_USER + token"
-            git remote add gitlab https://${{ secrets.GITLAB_USER }}:$TOKEN@gitlab.com/s.dierks/lemurcalls.git
+            git remote add gitlab https://${{ secrets.GITLAB_USER }}:$TOKEN@gitlab.gwdg.de/s.dierks/lemurcalls.git
           else
             echo "Using oauth2 + token"
-            git remote add gitlab https://oauth2:$TOKEN@gitlab.com/s.dierks/lemurcalls.git
+            git remote add gitlab https://oauth2:$TOKEN@gitlab.gwdg.de/s.dierks/lemurcalls.git
           fi
           git remote -v
           git push --mirror gitlab
