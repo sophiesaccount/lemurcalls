@@ -174,6 +174,8 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_encoder", type = int, default = 0 )
     parser.add_argument("--dropout", type = float, default = 0.0 )
     parser.add_argument("--num_workers", type = int, default = 4 )
+    parser.add_argument("--n_threads", type=int, default=20,
+                        help="Number of threads for audio/label loading.")
     parser.add_argument("--clear_cluster_codebook", type = int, help="set the pretrained model's cluster_codebook to empty dict. This is used when we train the segmenter on a complete new dataset. Set this to 0 if you just want to slighlt finetune the model with some additional data with the same cluster naming rule.", default = 0 )
     parser.add_argument("--num_classes", type = int, default = None,
                         help="Number of output classes. 1 = single-class (moan), 3 = multi-class (m/h/w). "
@@ -238,7 +240,12 @@ if __name__ == "__main__":
         print(f"Built dynamic codebook from labels: {cluster_codebook}")
     segmenter.update_cluster_codebook( cluster_codebook )
 
-    audio_list_train, label_list_train = load_data(audio_path_list_train, label_path_list_train, cluster_codebook = cluster_codebook, n_threads = 20 )
+    audio_list_train, label_list_train = load_data(
+        audio_path_list_train,
+        label_path_list_train,
+        cluster_codebook=cluster_codebook,
+        n_threads=args.n_threads,
+    )
 
     if args.val_ratio > 0:
         (audio_list_train, label_list_train), ( audio_list_val, label_list_val ) = train_val_split( audio_list_train, label_list_train, args.val_ratio )
