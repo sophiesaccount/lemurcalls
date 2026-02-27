@@ -192,3 +192,8 @@ experiments/
 *.png
 wandb/
 *.csv
+
+# keep presentation notebook assets
+!presentation_notebook/
+!presentation_notebook/**/*.png
+!presentation_notebook/**/*.ipynb
