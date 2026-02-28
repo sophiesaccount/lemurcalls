@@ -9,9 +9,7 @@ from tqdm import tqdm
 from datetime import datetime
 from scipy.signal import butter, filtfilt
 from ..visualization.scatterplot_ampl_snr_score import compute_snr_new
-from ...datautils import (
-    get_audio_and_label_paths_from_folders
-)
+from ...datautils import get_audio_and_label_paths_from_folders
 
 
 def highpass_filter(y, sr, cutoff=200, order=5):
@@ -38,26 +36,61 @@ def compute_snr(y, sr, cutoff=200, order=5):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract and save labeled audio segments above an SNR threshold.")
-    parser.add_argument("--audio_folder", required=True, help="Path to folder containing .wav files.")
-    parser.add_argument("--label_folder", required=True, help="Path to folder containing .json label files.")
-    parser.add_argument("--output_dir", default="high_snr_segments", help="Directory to save high-SNR snippets.")
-    parser.add_argument("--snr_threshold", type=float, default=-1, help="SNR threshold in dB.")
-    parser.add_argument("--sample_rate", type=int, default=16000, help="Target sample rate for loading audio.")
-    parser.add_argument("--cutoff", type=float, default=200, help="Frequency cutoff for SNR computation (Hz).")
-    parser.add_argument("--no_plot", action="store_true", help="Disable histogram plotting.")
-    parser.add_argument("--amplitude_threshold", type=float, default=0.035,
-                    help="Minimum peak amplitude for keeping a segment (0–1 range).")
+    parser = argparse.ArgumentParser(
+        description="Extract and save labeled audio segments above an SNR threshold."
+    )
+    parser.add_argument(
+        "--audio_folder", required=True, help="Path to folder containing .wav files."
+    )
+    parser.add_argument(
+        "--label_folder",
+        required=True,
+        help="Path to folder containing .json label files.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default="high_snr_segments",
+        help="Directory to save high-SNR snippets.",
+    )
+    parser.add_argument(
+        "--snr_threshold", type=float, default=-1, help="SNR threshold in dB."
+    )
+    parser.add_argument(
+        "--sample_rate",
+        type=int,
+        default=16000,
+        help="Target sample rate for loading audio.",
+    )
+    parser.add_argument(
+        "--cutoff",
+        type=float,
+        default=200,
+        help="Frequency cutoff for SNR computation (Hz).",
+    )
+    parser.add_argument(
+        "--no_plot", action="store_true", help="Disable histogram plotting."
+    )
+    parser.add_argument(
+        "--amplitude_threshold",
+        type=float,
+        default=0.035,
+        help="Minimum peak amplitude for keeping a segment (0–1 range).",
+    )
 
     args = parser.parse_args()
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    save_dir = os.path.join(args.output_dir, f"snr_above_{args.snr_threshold}dB_{timestamp}")
+    save_dir = os.path.join(
+        args.output_dir, f"snr_above_{args.snr_threshold}dB_{timestamp}"
+    )
     os.makedirs(save_dir, exist_ok=True)
 
-    audio_files = sorted([f for f in os.listdir(args.audio_folder) if f.endswith(".WAV")])
-    label_files = sorted([f for f in os.listdir(args.label_folder) if f.endswith((".jsonr", ".json"))])
-    
+    audio_files = sorted(
+        [f for f in os.listdir(args.audio_folder) if f.endswith(".WAV")]
+    )
+    label_files = sorted(
+        [f for f in os.listdir(args.label_folder) if f.endswith((".jsonr", ".json"))]
+    )
 
     if len(audio_files) == 0:
         print("No .wav files found in", args.audio_folder)
@@ -72,9 +105,13 @@ def main():
     count_saved = 0
     all_snrs = []
 
-    audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+        args.audio_folder, args.label_folder
+    )
     print(label_paths)
-    for audio_path, label_path in tqdm(zip(audio_paths, label_paths), total=len(label_paths)):
+    for audio_path, label_path in tqdm(
+        zip(audio_paths, label_paths), total=len(label_paths)
+    ):
         print(audio_path)
         print(label_path)
 
@@ -92,9 +129,18 @@ def main():
         scores = labels.get("score", ["unknown"] * len(onsets))
 
         # Prepare filtered lists
-        kept_onsets, kept_offsets, kept_clusters, kept_qualities, kept_scores, kept_snrs = [], [], [], [], [], []
+        (
+            kept_onsets,
+            kept_offsets,
+            kept_clusters,
+            kept_qualities,
+            kept_scores,
+            kept_snrs,
+        ) = [], [], [], [], [], []
 
-        for onset, offset, cluster_label, quality_label, score_label in zip(onsets, offsets, clusters, qualities, scores):
+        for onset, offset, cluster_label, quality_label, score_label in zip(
+            onsets, offsets, clusters, qualities, scores
+        ):
             start_sample = int(onset * sr)
             end_sample = int(offset * sr)
             segment_audio = y[start_sample:end_sample]
@@ -102,8 +148,12 @@ def main():
             if len(segment_audio) < 40:
                 continue
 
-            snr_db = compute_snr_new(segment_audio, sr, cutoff=args.cutoff, signal_high=1000)
-            segment_audio_filtered = highpass_filter(segment_audio, sr, cutoff=args.cutoff)
+            snr_db = compute_snr_new(
+                segment_audio, sr, cutoff=args.cutoff, signal_high=1000
+            )
+            segment_audio_filtered = highpass_filter(
+                segment_audio, sr, cutoff=args.cutoff
+            )
             max_amplitude = float(np.max(np.abs(segment_audio_filtered)))
             all_snrs.append(snr_db)
             print(args.amplitude_threshold)
@@ -133,21 +183,29 @@ def main():
                 "score": kept_scores,
                 "snr_db": kept_snrs,
             }
-            filtered_json_name = os.path.splitext(os.path.basename(audio_path))[0] + ".json"
+            filtered_json_name = (
+                os.path.splitext(os.path.basename(audio_path))[0] + ".json"
+            )
             filtered_json_path = os.path.join(save_dir, filtered_json_name)
             with open(filtered_json_path, "w") as jf:
                 json.dump(filtered_labels, jf, indent=2)
 
-
                 count_saved += 1
 
-    print(f"\nDone. Saved {count_saved} high-SNR segments (> {args.snr_threshold} dB) in: {save_dir}")
+    print(
+        f"\nDone. Saved {count_saved} high-SNR segments (> {args.snr_threshold} dB) in: {save_dir}"
+    )
 
     # Optional histogram plot
     if not args.no_plot and len(all_snrs) > 0:
         plt.figure(figsize=(8, 5))
         plt.hist(all_snrs, bins=40, color="skyblue", edgecolor="black", alpha=0.8)
-        plt.axvline(args.snr_threshold, color="r", linestyle="--", label=f"Threshold = {args.snr_threshold} dB")
+        plt.axvline(
+            args.snr_threshold,
+            color="r",
+            linestyle="--",
+            label=f"Threshold = {args.snr_threshold} dB",
+        )
         plt.title("Distribution of Segment SNRs")
         plt.xlabel("SNR (dB)")
         plt.ylabel("Count")

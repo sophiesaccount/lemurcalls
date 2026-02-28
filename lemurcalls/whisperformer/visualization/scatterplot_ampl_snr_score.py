@@ -20,7 +20,7 @@ from ...datautils import (
     load_data,
     slice_audios_and_labels,
     FIXED_CLUSTER_CODEBOOK,
-    ID_TO_CLUSTER
+    ID_TO_CLUSTER,
 )
 from ..train import collate_fn
 from ..train import soft_nms_1d_torch
@@ -38,27 +38,29 @@ from scipy.signal import butter, filtfilt
 
 ID_TO_CLUSTER = {
     0: "m",
-    1: "t",     # representative name for trill/lt/h
-    2: "w"
+    1: "t",  # representative name for trill/lt/h
+    2: "w",
 }
+
 
 def highpass_filter(y, sr, cutoff=200, order=5):
     """Apply Butterworth highpass filter to remove frequencies below cutoff Hz."""
     nyquist = 0.5 * sr
     normal_cutoff = cutoff / nyquist
-    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+    b, a = butter(order, normal_cutoff, btype="high", analog=False)
     y_filtered = filtfilt(b, a, y)
     return y_filtered
+
 
 def compute_snr(y, sr, cutoff=200, order=5):
     """Compute simple SNR in dB: signal = energy above cutoff Hz, noise = energy below cutoff."""
     y_signal = highpass_filter(y, sr, cutoff=cutoff, order=order)
     nyquist = 0.5 * sr
     normal_cutoff = cutoff / nyquist
-    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    b, a = butter(order, normal_cutoff, btype="low", analog=False)
     y_noise = filtfilt(b, a, y)
-    signal_power = np.mean(y_signal ** 2) + 1e-10
-    noise_power = np.mean(y_noise ** 2) + 1e-10
+    signal_power = np.mean(y_signal**2) + 1e-10
+    noise_power = np.mean(y_noise**2) + 1e-10
 
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
@@ -79,17 +81,17 @@ def compute_snr_timebased(y, sr, start_sample, end_sample):
     y_signal = y[start_sample:end_sample]
     noise_start = end_sample
     noise_end = end_sample + (end_sample - start_sample)
-    
+
     y_noise = y[noise_start:noise_end]
-    signal_power = np.mean(y_signal ** 2) + 1e-10
-    noise_power = np.mean(y_noise ** 2) + 1e-10
+    signal_power = np.mean(y_signal**2) + 1e-10
+    noise_power = np.mean(y_noise**2) + 1e-10
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
 
 
-
 from scipy.signal import butter, filtfilt
 import numpy as np
+
 
 def compute_snr_top200(y, sr, topband_hz=200, order=5):
     """Compute SNR in dB: noise = energy in top topband_hz Hz, signal = rest below Nyquist - topband_hz."""
@@ -99,36 +101,37 @@ def compute_snr_top200(y, sr, topband_hz=200, order=5):
         raise ValueError("Sample rate too low or topband_hz too large.")
 
     normal_cutoff = cutoff / nyquist
-    b_low, a_low = butter(order, normal_cutoff, btype='low', analog=False)
+    b_low, a_low = butter(order, normal_cutoff, btype="low", analog=False)
     y_signal = filtfilt(b_low, a_low, y)
 
-    b_high, a_high = butter(order, normal_cutoff, btype='high', analog=False)
+    b_high, a_high = butter(order, normal_cutoff, btype="high", analog=False)
     y_noise = filtfilt(b_high, a_high, y)
-    signal_power = np.mean(y_signal ** 2) + 1e-10
-    noise_power = np.mean(y_noise ** 2) + 1e-10
+    signal_power = np.mean(y_signal**2) + 1e-10
+    noise_power = np.mean(y_noise**2) + 1e-10
 
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
 
+
 from scipy.signal import butter, filtfilt
+
 
 def compute_snr_new(y, sr, cutoff=200, signal_high=1200, order=5):
     """Compute SNR in dB: signal = energy between cutoff and signal_high Hz, noise = below cutoff."""
     nyquist = 0.5 * sr
     normal_cutoff = cutoff / nyquist
-    b, a = butter(order, normal_cutoff, btype='low')
+    b, a = butter(order, normal_cutoff, btype="low")
     y_noise = filtfilt(b, a, y)
 
     high = min(signal_high, nyquist)
     low = cutoff
-    b, a = butter(order, [low/nyquist, high/nyquist], btype='band')
+    b, a = butter(order, [low / nyquist, high / nyquist], btype="band")
     y_signal = filtfilt(b, a, y)
     signal_power = np.mean(y_signal**2) + 1e-10
-    noise_power  = np.mean(y_noise**2) + 1e-10
+    noise_power = np.mean(y_noise**2) + 1e-10
 
     snr_db = 10 * np.log10(signal_power / noise_power)
     return snr_db
-
 
 
 def plot_spectrogram_and_scores(
@@ -141,7 +144,7 @@ def plot_spectrogram_and_scores(
     save_dir,
     base_name,
     threshold=0.35,
-    ID_TO_CLUSTER=None
+    ID_TO_CLUSTER=None,
 ):
     """Plot mel spectrogram, class scores, and ground truth for one segment.
 
@@ -158,32 +161,44 @@ def plot_spectrogram_and_scores(
     """
     T = class_scores.shape[0]
     num_classes = class_scores.shape[1]
-    #sec_per_col = 0.02  # WhisperFeatureExtractor → 50 Hz, also 20 ms / Frame
+    # sec_per_col = 0.02  # WhisperFeatureExtractor → 50 Hz, also 20 ms / Frame
     downsample_ratio = mel_spec.shape[1] / class_scores.shape[0]
     sec_per_col = 0.02 * downsample_ratio
     time_axis = np.arange(T) * sec_per_col
 
-    color_map = {0: 'darkorange', 1: 'cornflowerblue', 2: 'gold', 3: 'r'}
+    color_map = {0: "darkorange", 1: "cornflowerblue", 2: "gold", 3: "r"}
 
     fig, axs = plt.subplots(2, 1, figsize=(12, 6), height_ratios=[3, 1])
 
-    librosa.display.specshow(mel_spec, sr=16000, hop_length=320, x_axis="time", y_axis="mel", ax=axs[0])
+    librosa.display.specshow(
+        mel_spec, sr=16000, hop_length=320, x_axis="time", y_axis="mel", ax=axs[0]
+    )
     axs[0].set_title(f"{base_name} – Segment {segment_idx}: Mel spectrogram")
     axs[0].set_xlabel("")
     axs[0].set_ylabel("Mel frequency (Hz)")
 
-    frame_width = sec_per_col 
+    frame_width = sec_per_col
     for c in range(num_classes):
-        #axs[1].plot(time_axis, class_scores[:, c], label=f"Class {ID_TO_CLUSTER[c]}", alpha=0.8)
-        axs[1].bar(time_axis, class_scores[:, c], width=frame_width, align='edge', alpha=0.6, label=f"Class {ID_TO_CLUSTER[c]}",color=color_map[FIXED_CLUSTER_CODEBOOK[ID_TO_CLUSTER[c]]])
+        # axs[1].plot(time_axis, class_scores[:, c], label=f"Class {ID_TO_CLUSTER[c]}", alpha=0.8)
+        axs[1].bar(
+            time_axis,
+            class_scores[:, c],
+            width=frame_width,
+            align="edge",
+            alpha=0.6,
+            label=f"Class {ID_TO_CLUSTER[c]}",
+            color=color_map[FIXED_CLUSTER_CODEBOOK[ID_TO_CLUSTER[c]]],
+        )
 
-    axs[1].axhline(y=threshold, color='r', linestyle='--', label=f"Threshold {threshold}")
+    axs[1].axhline(
+        y=threshold, color="r", linestyle="--", label=f"Threshold {threshold}"
+    )
     axs[1].set_ylim(0, 1)
     axs[1].set_title("Scores + Ground Truth")
     axs[1].set_xlabel("Time (s)")
     axs[1].set_ylabel("Score")
-    axs[1].set_xlim(0, T * sec_per_col) 
-    
+    axs[1].set_xlim(0, T * sec_per_col)
+
     """
     # 🎯 Ground Truth Overlay
     colors = plt.cm.tab10(np.linspace(0, 1, num_classes))
@@ -200,12 +215,12 @@ def plot_spectrogram_and_scores(
 
     for onset, offset, c in zip(gt_onsets, gt_offsets, gt_classes):
         axs[1].axvspan(
-            2*onset, 2*offset, 
+            2 * onset,
+            2 * offset,
             color=color_map[FIXED_CLUSTER_CODEBOOK[c]],  # Mapping statt modulo
-            alpha=0.3, 
-            label=f"GT class {c}"
+            alpha=0.3,
+            label=f"GT class {c}",
         )
-
 
     handles, labels = axs[1].get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
@@ -217,19 +232,25 @@ def plot_spectrogram_and_scores(
     save_path = os.path.join(save_dir, save_filename)
     plt.savefig(save_path, dpi=150)
     plt.close()
-    #print(f"✅ Segment-Plot gespeichert unter {save_path}")
+    # print(f"✅ Segment-Plot gespeichert unter {save_path}")
 
 
 # ==================== MODEL LOADING ====================
 
+
 def load_trained_whisperformer(checkpoint_path, num_classes, device):
     """Load a trained WhisperFormer, inferring architecture and Whisper size from the checkpoint."""
-    from ..model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
+    from ..model import (
+        infer_architecture_from_state_dict,
+        detect_whisper_size_from_state_dict,
+    )
 
     state_dict = torch.load(checkpoint_path, map_location=device)
 
     # Infer architecture
-    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    num_decoder_layers, num_head_layers, ckpt_num_classes = (
+        infer_architecture_from_state_dict(state_dict)
+    )
     if ckpt_num_classes is not None:
         num_classes = ckpt_num_classes
 
@@ -239,11 +260,15 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
         path_lower = checkpoint_path.lower()
         detected_size = "large" if "large" in path_lower else "base"
 
-    print(f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
-          f"num_head_layers={num_head_layers}, num_classes={num_classes}")
+    print(
+        f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
+        f"num_head_layers={num_head_layers}, num_classes={num_classes}"
+    )
 
     # Load only the config (small JSON), not the full pretrained model
-    _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    _project_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
     _whisper_models_dir = os.path.join(_project_root, "whisper_models")
     config_path = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
 
@@ -251,7 +276,12 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
     whisper_model = WhisperModel(config)
     encoder = whisper_model.encoder
 
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+    model = WhisperFormer(
+        encoder,
+        num_classes=num_classes,
+        num_decoder_layers=num_decoder_layers,
+        num_head_layers=num_head_layers,
+    )
 
     # Remap keys if needed (checkpoint "encoder.X" -> model "encoder.encoder.X")
     needs_remap = any(
@@ -275,7 +305,10 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
 
 # ==================== INFERENCE ====================
 
-def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
+
+def run_inference_new(
+    model, dataloader, device, threshold, iou_threshold, metadata_list
+):
     """Run inference and assign each prediction to the corresponding slice in metadata_list."""
     preds_by_slice = []
     slice_idx = 0
@@ -287,8 +320,14 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                 if isinstance(v, torch.Tensor):
                     batch[k] = v.to(device, non_blocking=True)
 
-            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (hasattr(device, "type") and device.type == "cuda")
-            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (
+                hasattr(device, "type") and device.type == "cuda"
+            )
+            autocast_ctx = (
+                torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+                if use_autocast
+                else contextlib.nullcontext()
+            )
 
             with autocast_ctx:
                 class_preds, regr_preds = model(batch["input_features"])
@@ -306,25 +345,29 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                         score = class_probs[b, t, c]
                         if float(score) > threshold:
                             start = t - regr_preds[b, t, 0]
-                            end   = t + regr_preds[b, t, 1]
+                            end = t + regr_preds[b, t, 1]
                             intervals.append(torch.stack([start, end, score]))
 
                     if len(intervals) > 0:
                         intervals = torch.stack(intervals)
-                        intervals = soft_nms_1d_torch(intervals, iou_threshold=iou_threshold)
-                        #intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
+                        intervals = soft_nms_1d_torch(
+                            intervals, iou_threshold=iou_threshold
+                        )
+                        # intervals = nms_1d_torch(intervals, iou_threshold=iou_threshold)
                         intervals = intervals.cpu().tolist()
                     else:
                         intervals = []
 
                     preds_per_class.append({"class": c, "intervals": intervals})
 
-                preds_by_slice.append({
-                    "original_idx": meta["original_idx"],
-                    "segment_idx": meta["segment_idx"],
-                    "preds": preds_per_class,
-                    "scores": class_probs[b].detach().cpu().numpy()
-                })
+                preds_by_slice.append(
+                    {
+                        "original_idx": meta["original_idx"],
+                        "segment_idx": meta["segment_idx"],
+                        "preds": preds_per_class,
+                        "scores": class_probs[b].detach().cpu().numpy(),
+                    }
+                )
 
     assert len(preds_by_slice) == len(metadata_list), (
         f"Prediction list length ({len(preds_by_slice)}) != metadata list length ({len(metadata_list)}). "
@@ -351,9 +394,9 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
             offset_cols = seg["segment_idx"] * cols_per_segment
             for p in seg["preds"]:
                 c = p["class"]
-                for (start_col, end_col, score) in p["intervals"]:
+                for start_col, end_col, score in p["intervals"]:
                     start_sec = (offset_cols + start_col) * sec_per_col
-                    end_sec   = (offset_cols + end_col)   * sec_per_col
+                    end_sec = (offset_cols + end_col) * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
@@ -376,7 +419,9 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0.35)
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--cutoff", type=int, default=200)
@@ -393,17 +438,29 @@ if __name__ == "__main__":
         json.dump(vars(args), f, indent=2)
     print(f"Arguments saved to: {args_path}")
 
-    #os.makedirs(args.output_dir, exist_ok=True)
+    # os.makedirs(args.output_dir, exist_ok=True)
 
-    audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+        args.audio_folder, args.label_folder
+    )
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
-    feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
+    model = load_trained_whisperformer(
+        args.checkpoint_path, args.num_classes, args.device
+    )
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(
+        "openai/whisper-small", local_files_only=True
+    )
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
-    all_preds  = {"onset": [], "offset": [], "cluster": [], "score": [], "original_idx": []}
+    all_preds = {
+        "onset": [],
+        "offset": [],
+        "cluster": [],
+        "score": [],
+        "original_idx": [],
+    }
 
     amplitudes = []
     scores = []
@@ -418,31 +475,49 @@ if __name__ == "__main__":
 
     for i, (audio_path, label_path) in enumerate(zip(audio_paths, label_paths)):
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
-        #print(f"\n===== Processing {os.path.basename(audio_path)} =====")
-        
-        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
-        audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+        # print(f"\n===== Processing {os.path.basename(audio_path)} =====")
 
-        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
-                                collate_fn=collate_fn, drop_last=False)
+        audio_list, label_list = load_data(
+            [audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1
+        )
+        audio_list, label_list, metadata_list = slice_audios_and_labels(
+            audio_list, label_list, args.total_spec_columns
+        )
+
+        dataset = WhisperFormerDatasetQuality(
+            audio_list,
+            label_list,
+            args.total_spec_columns,
+            feature_extractor,
+            args.num_classes,
+            args.low_quality_value,
+            args.value_q2,
+            args.centerframe_size,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            drop_last=False,
+        )
 
         preds_by_slice = run_inference_new(
-        model=model,
-        dataloader=dataloader,
-        device=args.device,
-        threshold=args.threshold,
-        iou_threshold=args.iou_threshold,
-        metadata_list=metadata_list
+            model=model,
+            dataloader=dataloader,
+            device=args.device,
+            threshold=args.threshold,
+            iou_threshold=args.iou_threshold,
+            metadata_list=metadata_list,
         )
         for p in preds_by_slice:
             p["original_idx"] = i
-        #print(f'preds_by_slice: {preds_by_slice}')
-        
+        # print(f'preds_by_slice: {preds_by_slice}')
+
         # Labels laden
         with open(label_path, "r") as f:
             labels = json.load(f)
-        
+
         clusters = labels["cluster"]
         labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
@@ -485,9 +560,12 @@ if __name__ == "__main__":
 
         file_slices = [p for p in preds_by_slice if p["original_idx"] == i]
 
-        #print(f'file_slices: {file_slices}')
-        score_list = [p["scores"] for p in sorted(file_slices, key=lambda x: x["segment_idx"]) if "scores" in p and len(p["scores"]) > 0]
-
+        # print(f'file_slices: {file_slices}')
+        score_list = [
+            p["scores"]
+            for p in sorted(file_slices, key=lambda x: x["segment_idx"])
+            if "scores" in p and len(p["scores"]) > 0
+        ]
 
         if len(score_list) > 0:
             all_scores = np.concatenate(score_list, axis=0)
@@ -496,7 +574,9 @@ if __name__ == "__main__":
             print("No scores found; file_slices is empty or has no valid 'scores'.")
 
         # --- Pro Ground Truth Event ---
-        for onset, offset, cluster_label, cluster_quality in zip(gt_onsets, gt_offsets, gt_clusters, gt_qualities):
+        for onset, offset, cluster_label, cluster_quality in zip(
+            gt_onsets, gt_offsets, gt_clusters, gt_qualities
+        ):
             # Center-Time in Sekunden
             center_sec = 0.5 * (onset + offset)
             frame_idx = int(center_sec / sec_per_col)
@@ -520,24 +600,27 @@ if __name__ == "__main__":
                 continue
 
             # Nur Frequenzen oberhalb von 200 Hz berücksichtigen
-            segment_audio_filtered = highpass_filter(segment_audio, sr, cutoff=args.cutoff)
+            segment_audio_filtered = highpass_filter(
+                segment_audio, sr, cutoff=args.cutoff
+            )
             max_amp = float(np.max(np.abs(segment_audio_filtered)))
-            #max_amp = float(np.max(np.abs(segment_audio)))
+            # max_amp = float(np.max(np.abs(segment_audio)))
 
             amplitudes.append(max_amp)
             scores.append(float(model_score))
             classes.append(cluster_label)
             qualities.append(cluster_quality)
 
-            #snr_value = compute_snr(segment_audio, sr, cutoff=args.cutoff)
-            #snr_value = compute_snr_timebased(y, sr, start_sample, end_sample)
-            snr_value = compute_snr_new(segment_audio, sr, cutoff=args.cutoff,signal_high=1000)
-            #print(cluster_quality, snr_value)
+            # snr_value = compute_snr(segment_audio, sr, cutoff=args.cutoff)
+            # snr_value = compute_snr_timebased(y, sr, start_sample, end_sample)
+            snr_value = compute_snr_new(
+                segment_audio, sr, cutoff=args.cutoff, signal_high=1000
+            )
+            # print(cluster_quality, snr_value)
 
-            #snr_value = compute_snr_top200(segment_audio, sr)
+            # snr_value = compute_snr_top200(segment_audio, sr)
 
             snrs.append(snr_value)
-
 
     """
 
@@ -648,31 +731,31 @@ if __name__ == "__main__":
         sns.scatterplot(
             x=amplitudes,
             y=snrs,
-            hue=qualities,          # Punkte nach Quality einfärben
+            hue=qualities,  # Punkte nach Quality einfärben
             style=[map_classes[c] for c in classes],
             palette="Set3",
-            markers=["o", "s", "X", "v", "D", "^", "P"], 
+            markers=["o", "s", "X", "v", "D", "^", "P"],
             alpha=0.7,
             edgecolor="k",
-            s=60
+            s=60,
         )
         # 🔴 Threshold-Linien hinzufügen
-        plt.axvline(x=0.035, color='red', linestyle='--', linewidth=1.5)
-        plt.axhline(y=-1,     color='red', linestyle='--', linewidth=1.5)
+        plt.axvline(x=0.035, color="red", linestyle="--", linewidth=1.5)
+        plt.axhline(y=-1, color="red", linestyle="--", linewidth=1.5)
 
-        #plt.xlabel("Maximale Amplitude")
-        #plt.ylabel("Signal-to-Noise Ratio (dB)")
-        #plt.title("SNR vs. Max Amplitude nach Quality Class")
-        #plt.grid(True, linestyle="--", alpha=0.5)
-        #plt.xscale("log")
-        #plt.tight_layout()
+        # plt.xlabel("Maximale Amplitude")
+        # plt.ylabel("Signal-to-Noise Ratio (dB)")
+        # plt.title("SNR vs. Max Amplitude nach Quality Class")
+        # plt.grid(True, linestyle="--", alpha=0.5)
+        # plt.xscale("log")
+        # plt.tight_layout()
         plt.xlabel("Maximal Amplitude")
         plt.ylabel("Signal-to-Noise Ratio (dB)")
-        #plt.title("SNR vs. Max Amplitude by Quality and Call Class")
+        # plt.title("SNR vs. Max Amplitude by Quality and Call Class")
         plt.grid(True, linestyle="--", alpha=0.5)
-        plt.xscale("log") 
+        plt.xscale("log")
         plt.xticks(rotation=45)
-        #plt.yscale("log") 
+        # plt.yscale("log")
         plt.tight_layout()
 
         snr_amp_path = os.path.join(save_dir, "scatter_snr_vs_amplitude.png")
@@ -682,32 +765,32 @@ if __name__ == "__main__":
     else:
         print("⚠️ Keine gültigen Daten für SNR–Amplitude-Plot gefunden.")
 
-
     # === Scatterplot: SNR vs Max Amplitude, colored by Model Score ===
     if len(snrs) > 0 and len(amplitudes) > 0 and len(scores) > 0:
         plt.figure(figsize=(8, 6))
         scatter = plt.scatter(
             amplitudes,
             snrs,
-            c=scores,             # Punkte nach Model Score einfärben
-            cmap='viridis',       # Farbpalette (hell = hoch, dunkel = niedrig)
+            c=scores,  # Punkte nach Model Score einfärben
+            cmap="viridis",  # Farbpalette (hell = hoch, dunkel = niedrig)
             alpha=0.8,
-            edgecolor='k',
-            s=60
+            edgecolor="k",
+            s=60,
         )
         plt.xlabel("Maximal Amplitude")
         plt.ylabel("Signal-to-Noise Ratio (dB)")
-        #plt.title("SNR vs. Max Amplitude by Model Score")
+        # plt.title("SNR vs. Max Amplitude by Model Score")
         plt.grid(True, linestyle="--", alpha=0.5)
-        plt.xscale("log") 
-        #plt.yscale("log")
+        plt.xscale("log")
+        # plt.yscale("log")
         plt.colorbar(scatter, label="Model Score")
         plt.tight_layout()
 
-        snr_amp_score_path = os.path.join(save_dir, "scatter_snr_vs_amplitude_model_score.png")
+        snr_amp_score_path = os.path.join(
+            save_dir, "scatter_snr_vs_amplitude_model_score.png"
+        )
         plt.savefig(snr_amp_score_path, dpi=150)
         plt.close()
         print(f"✅ Scatterplot gespeichert unter: {snr_amp_score_path}")
     else:
         print("⚠️ Keine gültigen Daten für SNR–Amplitude–Score-Plot gefunden.")
-

@@ -16,23 +16,26 @@ from .datautils import (
     load_data,
     slice_audios_and_labels,
     FIXED_CLUSTER_CODEBOOK,
-    ID_TO_CLUSTER
+    ID_TO_CLUSTER,
 )
 from .train import collate_fn, run_inference_new
 
 
 def _get_audio_paths(audio_folder):
     """List all WAV files in a folder (no label matching needed)."""
-    return sorted([
-        os.path.join(audio_folder, f)
-        for f in os.listdir(audio_folder)
-        if f.lower().endswith(".wav")
-    ])
+    return sorted(
+        [
+            os.path.join(audio_folder, f)
+            for f in os.listdir(audio_folder)
+            if f.lower().endswith(".wav")
+        ]
+    )
 
 
 def _load_audio_only(audio_path, cluster_codebook):
     """Load a single audio file and create an empty dummy label dict."""
     import librosa
+
     y, _ = librosa.load(audio_path, sr=16000)
     y = y.astype(np.float32)
     label = {
@@ -46,24 +49,28 @@ def _load_audio_only(audio_path, cluster_codebook):
     return [y], [label]
 
 
-def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_columns=2000, offset=0):
-
+def slice_audios_and_labels(
+    audio_list, label_list, total_spec_columns, pad_columns=2000, offset=0
+):
     """
     Slice audios into overlapping segments with different offsets (0, 1/3, 2/3).
     Returns expanded audio_list, label_list, metadata_list with offset_frac.
     """
     padded_audio_list = [
-        np.concatenate([
-            np.zeros((pad_columns, 1)),
-            np.expand_dims(a, axis=1),
-            np.zeros((pad_columns, 1))
-        ], axis=0)
+        np.concatenate(
+            [
+                np.zeros((pad_columns, 1)),
+                np.expand_dims(a, axis=1),
+                np.zeros((pad_columns, 1)),
+            ],
+            axis=0,
+        )
         for a in audio_list
     ]
     new_audios, new_labels, new_metadata = [], [], []
     sec_per_col = 0.01
     spec_time_step = 0.01
-    total_spec_columns=3000
+    total_spec_columns = 3000
 
     for orig_idx, (audio, label) in enumerate(zip(audio_list, label_list)):
         sr = 16000
@@ -77,9 +84,8 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
             end = start + num_samples_in_clip
             audio_clip = audio[start:end]
 
-            #if len(audio_clip) < sr * 0.1:  # skip super short
+            # if len(audio_clip) < sr * 0.1:  # skip super short
             #    break
-
 
             start_time = start / sr
             end_time = end / sr
@@ -88,21 +94,33 @@ def slice_audios_and_labels(audio_list, label_list, total_spec_columns, pad_colu
             )
 
             label_clip = deepcopy(label)
-            label_clip.update({
-                "onset": np.maximum(label["onset"][intersected_indices], start_time) - start_time,
-                "offset": np.minimum(label["offset"][intersected_indices], end_time) - start_time,
-                "cluster_id": label["cluster_id"][intersected_indices],
-                "cluster": [label["cluster"][idx] for idx in np.argwhere(intersected_indices)[:, 0]],
-                "quality": [label["quality"][idx] for idx in np.argwhere(intersected_indices)[:, 0]]
-            })
+            label_clip.update(
+                {
+                    "onset": np.maximum(label["onset"][intersected_indices], start_time)
+                    - start_time,
+                    "offset": np.minimum(label["offset"][intersected_indices], end_time)
+                    - start_time,
+                    "cluster_id": label["cluster_id"][intersected_indices],
+                    "cluster": [
+                        label["cluster"][idx]
+                        for idx in np.argwhere(intersected_indices)[:, 0]
+                    ],
+                    "quality": [
+                        label["quality"][idx]
+                        for idx in np.argwhere(intersected_indices)[:, 0]
+                    ],
+                }
+            )
             new_audios.append(audio_clip)
             new_labels.append(label_clip)
-            new_metadata.append({
-                "original_idx": orig_idx,
-                "segment_idx": seg_idx,
-                "offset_frac": offset,
-                "trial_id": offset
-            })
+            new_metadata.append(
+                {
+                    "original_idx": orig_idx,
+                    "segment_idx": seg_idx,
+                    "offset_frac": offset,
+                    "trial_id": offset,
+                }
+            )
             start += num_samples_in_clip
             seg_idx += 1
 
@@ -146,12 +164,17 @@ def load_trained_whisperformer(
     Returns:
         Tuple (model, detected_size string).
     """
-    from .model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
+    from .model import (
+        infer_architecture_from_state_dict,
+        detect_whisper_size_from_state_dict,
+    )
 
     state_dict = torch.load(checkpoint_path, map_location=device)
 
     # Infer architecture from checkpoint
-    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    num_decoder_layers, num_head_layers, ckpt_num_classes = (
+        infer_architecture_from_state_dict(state_dict)
+    )
     if ckpt_num_classes is not None:
         num_classes = ckpt_num_classes
 
@@ -164,11 +187,15 @@ def load_trained_whisperformer(
             path_lower = checkpoint_path.lower()
             detected_size = "large" if "large" in path_lower else "base"
 
-    print(f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
-          f"num_head_layers={num_head_layers}, num_classes={num_classes}")
+    print(
+        f"Checkpoint: whisper_size={detected_size}, num_decoder_layers={num_decoder_layers}, "
+        f"num_head_layers={num_head_layers}, num_classes={num_classes}"
+    )
 
     if whisper_load_source == "local":
-        _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        _project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
         _whisper_models_dir = os.path.join(_project_root, "whisper_models")
         config_source = os.path.join(_whisper_models_dir, f"whisper_{detected_size}")
     elif whisper_load_source == "hf":
@@ -179,12 +206,17 @@ def load_trained_whisperformer(
     config = WhisperConfig.from_pretrained(config_source)
     whisper_model = WhisperModel(config)
     encoder = whisper_model.encoder
-    
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+
+    model = WhisperFormer(
+        encoder,
+        num_classes=num_classes,
+        num_decoder_layers=num_decoder_layers,
+        num_head_layers=num_head_layers,
+    )
 
     # Checkpoint may have "encoder.X"; model expects "encoder.encoder.X" due to WhisperEncoder wrapper
     needs_remap = any(
-        k.startswith("encoder.") and not k.startswith("encoder.encoder.") 
+        k.startswith("encoder.") and not k.startswith("encoder.encoder.")
         for k in state_dict.keys()
     )
     if needs_remap:
@@ -204,6 +236,7 @@ def load_trained_whisperformer(
 
 # ==================== INFERENCE ====================
 
+
 def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
     grouped_preds = defaultdict(list)
     for ps in preds_by_slice:
@@ -211,7 +244,13 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
 
     sec_per_col = 0.02
     cols_per_segment = total_spec_columns // 2
-    all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    all_preds_final = {
+        "onset": [],
+        "offset": [],
+        "cluster": [],
+        "score": [],
+        "orig_idx": [],
+    }
 
     for orig_idx in sorted(grouped_preds.keys()):
         segs_sorted = sorted(grouped_preds[orig_idx], key=lambda x: x["segment_idx"])
@@ -219,9 +258,9 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
             offset_cols = seg["segment_idx"] * cols_per_segment
             for p in seg["preds"]:
                 c = p["class"]
-                for (start_col, end_col, score) in p["intervals"]:
+                for start_col, end_col, score in p["intervals"]:
                     start_sec = (offset_cols + start_col) * sec_per_col
-                    end_sec   = (offset_cols + end_col)   * sec_per_col
+                    end_sec = (offset_cols + end_col) * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
@@ -231,17 +270,38 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
     return all_preds_final
 
 
-
 # ==================== CONSOLIDATION ====================
+
 
 def consolidate_preds(all_preds_runs, overlap_tolerance=0.1):
     """Merge overlapping predictions across multiple runs; keep best score per overlap group."""
-    consolidated = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    consolidated = {
+        "onset": [],
+        "offset": [],
+        "cluster": [],
+        "score": [],
+        "orig_idx": [],
+    }
     combined_preds = []
 
     for run_idx, preds in enumerate(all_preds_runs):
-        for o, f, c, s, oi in zip(preds["onset"], preds["offset"], preds["cluster"], preds["score"], preds["orig_idx"]):
-            combined_preds.append({"onset": o, "offset": f, "cluster": c, "score": s, "orig_idx": oi, "run": run_idx})
+        for o, f, c, s, oi in zip(
+            preds["onset"],
+            preds["offset"],
+            preds["cluster"],
+            preds["score"],
+            preds["orig_idx"],
+        ):
+            combined_preds.append(
+                {
+                    "onset": o,
+                    "offset": f,
+                    "cluster": c,
+                    "score": s,
+                    "orig_idx": oi,
+                    "run": run_idx,
+                }
+            )
 
     for cluster in set(p["cluster"] for p in combined_preds):
         cluster_preds = [p for p in combined_preds if p["cluster"] == cluster]
@@ -256,7 +316,9 @@ def consolidate_preds(all_preds_runs, overlap_tolerance=0.1):
             for j, p2 in enumerate(cluster_preds):
                 if i == j or j in used:
                     continue
-                intersection = max(0, min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"]))
+                intersection = max(
+                    0, min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"])
+                )
                 union = max(p1["offset"], p2["offset"]) - min(p1["onset"], p2["onset"])
                 iou = intersection / union if union > 0 else 0
                 if iou > overlap_tolerance:
@@ -277,13 +339,27 @@ def consolidate_preds(all_preds_runs, overlap_tolerance=0.1):
 def consolidate_preds_per_file(all_preds_runs, overlap_tolerance=0.1):
     from collections import defaultdict
 
-    consolidated = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    consolidated = {
+        "onset": [],
+        "offset": [],
+        "cluster": [],
+        "score": [],
+        "orig_idx": [],
+    }
 
     # Alle Predictions nach orig_idx gruppieren
     preds_by_file = defaultdict(list)
     for run_idx, preds in enumerate(all_preds_runs):
-        for o, f, c, s, oi in zip(preds["onset"], preds["offset"], preds["cluster"], preds["score"], preds["orig_idx"]):
-            preds_by_file[oi].append({"onset": o, "offset": f, "cluster": c, "score": s, "run": run_idx})
+        for o, f, c, s, oi in zip(
+            preds["onset"],
+            preds["offset"],
+            preds["cluster"],
+            preds["score"],
+            preds["orig_idx"],
+        ):
+            preds_by_file[oi].append(
+                {"onset": o, "offset": f, "cluster": c, "score": s, "run": run_idx}
+            )
 
     # Für jede Datei separat konsolidieren
     for orig_idx, file_preds in preds_by_file.items():
@@ -304,8 +380,13 @@ def consolidate_preds_per_file(all_preds_runs, overlap_tolerance=0.1):
                 for j, p2 in enumerate(cluster_preds):
                     if i == j or j in used:
                         continue
-                    intersection = max(0, min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"]))
-                    union = max(p1["offset"], p2["offset"]) - min(p1["onset"], p2["onset"])
+                    intersection = max(
+                        0,
+                        min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"]),
+                    )
+                    union = max(p1["offset"], p2["offset"]) - min(
+                        p1["onset"], p2["onset"]
+                    )
                     iou = intersection / union if union > 0 else 0
                     if iou > overlap_tolerance:
                         overlapping_runs.append(p2["run"])
@@ -330,8 +411,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", required=True)
     parser.add_argument("--audio_folder", required=True)
-    parser.add_argument("--label_folder", default=None,
-                        help="Label folder (optional). If omitted, only audio files are needed.")
+    parser.add_argument(
+        "--label_folder",
+        default=None,
+        help="Label folder (optional). If omitted, only audio files are needed.",
+    )
     parser.add_argument("--output_dir", default="inference_outputs")
     parser.add_argument("--total_spec_columns", type=int, default=3000)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -339,14 +423,20 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0)
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
-    parser.add_argument("--allowed_qualities", default=[1,2])
+    parser.add_argument("--allowed_qualities", default=[1, 2])
     parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
-    parser.add_argument("--whisper_size", type=str, default=None, 
-                        help="Whisper model size: 'base' or 'large'. If not specified, will be auto-detected from checkpoint path.")
+    parser.add_argument(
+        "--whisper_size",
+        type=str,
+        default=None,
+        help="Whisper model size: 'base' or 'large'. If not specified, will be auto-detected from checkpoint path.",
+    )
     parser.add_argument(
         "--whisper_load_source",
         type=str,
@@ -370,45 +460,62 @@ if __name__ == "__main__":
     with open(os.path.join(save_dir, "run_arguments.json"), "w") as f:
         json.dump(vars(args), f, indent=2)
 
-
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
     if args.label_folder is not None:
-        audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+        audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+            args.audio_folder, args.label_folder
+        )
     else:
         audio_paths = _get_audio_paths(args.audio_folder)
         label_paths = [None] * len(audio_paths)
 
     # Modell laden und Whisper-Größe erkennen
     model, detected_whisper_size = load_trained_whisperformer(
-        args.checkpoint_path, 
-        args.num_classes, 
+        args.checkpoint_path,
+        args.num_classes,
         args.device,
         whisper_size=args.whisper_size,
         whisper_load_source=args.whisper_load_source,
         whisper_model_id=args.whisper_model_id,
     )
-    
+
     # Feature extractor loading: local files or Hugging Face
     if args.whisper_load_source == "local":
-        _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        _project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
         _whisper_models_dir = os.path.join(_project_root, "whisper_models")
-        feature_source = os.path.join(_whisper_models_dir, f"whisper_{detected_whisper_size}")
+        feature_source = os.path.join(
+            _whisper_models_dir, f"whisper_{detected_whisper_size}"
+        )
         feature_extractor = WhisperFeatureExtractor.from_pretrained(
             feature_source,
             local_files_only=True,
         )
     else:
-        hf_model_id = _resolve_hf_whisper_model_id(detected_whisper_size, args.whisper_model_id)
+        hf_model_id = _resolve_hf_whisper_model_id(
+            detected_whisper_size, args.whisper_model_id
+        )
         feature_extractor = WhisperFeatureExtractor.from_pretrained(hf_model_id)
 
-
-    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": [], "orig_idx": []}
+    all_preds_final = {
+        "onset": [],
+        "offset": [],
+        "cluster": [],
+        "score": [],
+        "orig_idx": [],
+    }
     for audio_path, label_path in zip(audio_paths, label_paths):
         print(f"\n===== Processing {os.path.basename(audio_path)} =====")
         if label_path is not None:
-            audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
+            audio_list, label_list = load_data(
+                [audio_path],
+                [label_path],
+                cluster_codebook=cluster_codebook,
+                n_threads=1,
+            )
         else:
             audio_list, label_list = _load_audio_only(audio_path, cluster_codebook)
         # ======= Drei Slicing-Durchläufe mit Offsets =======
@@ -416,18 +523,32 @@ if __name__ == "__main__":
         all_preds_runs = []
 
         for offset_idx, offset in enumerate(shift_offsets):
-            audio_list_shifted, label_list_shifted, metadata_list_shifted = slice_audios_and_labels(
-                audio_list, label_list, args.total_spec_columns, offset=offset
+            audio_list_shifted, label_list_shifted, metadata_list_shifted = (
+                slice_audios_and_labels(
+                    audio_list, label_list, args.total_spec_columns, offset=offset
+                )
             )
-            print(f"[Run {offset_idx+1}] Created {len(audio_list_shifted)} slices with offset {offset}")
+            print(
+                f"[Run {offset_idx + 1}] Created {len(audio_list_shifted)} slices with offset {offset}"
+            )
 
             val_dataset = WhisperFormerDatasetQuality(
-                audio_list_shifted, label_list_shifted, args.total_spec_columns,
-                feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size
+                audio_list_shifted,
+                label_list_shifted,
+                args.total_spec_columns,
+                feature_extractor,
+                args.num_classes,
+                args.low_quality_value,
+                args.value_q2,
+                args.centerframe_size,
             )
             val_dataloader = DataLoader(
-                val_dataset, batch_size=args.batch_size, shuffle=False,
-                num_workers=args.num_workers, collate_fn=collate_fn, drop_last=False
+                val_dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                collate_fn=collate_fn,
+                drop_last=False,
             )
 
             preds_by_slice = run_inference_new(
@@ -436,18 +557,20 @@ if __name__ == "__main__":
                 device=args.device,
                 threshold=args.threshold,
                 iou_threshold=args.iou_threshold,
-                metadata_list=metadata_list_shifted
+                metadata_list=metadata_list_shifted,
             )
 
-            final_preds_shifted = reconstruct_predictions(preds_by_slice, args.total_spec_columns, ID_TO_CLUSTER)
-
-
+            final_preds_shifted = reconstruct_predictions(
+                preds_by_slice, args.total_spec_columns, ID_TO_CLUSTER
+            )
 
             all_preds_runs.append(final_preds_shifted)
 
         # ======= Konsolidierung für jedes File einzeln=======
 
-        final_preds = consolidate_preds(all_preds_runs, overlap_tolerance=args.overlap_tolerance)
+        final_preds = consolidate_preds(
+            all_preds_runs, overlap_tolerance=args.overlap_tolerance
+        )
 
         # Predictions pro Datei speichern
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
@@ -455,5 +578,3 @@ if __name__ == "__main__":
         with open(json_path, "w") as f:
             json.dump(final_preds, f, indent=2)
         print(f"✅ Predictions saved to {json_path}")
-
-    
