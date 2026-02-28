@@ -6,6 +6,7 @@ on:
       - main
       - application-notebooks
       - presentation-and-readme
+      
   workflow_dispatch:
 
 jobs:
@@ -32,7 +33,8 @@ jobs:
             git remote add gitlab https://oauth2:$TOKEN@gitlab.gwdg.de/s.dierks/lemurcalls.git
           fi
           git remote -v
-          git fetch origin --prune
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --prune
+          git fetch origin --tags --prune
           git update-ref -d refs/remotes/origin/HEAD || true
           git push gitlab 'refs/remotes/origin/*:refs/heads/*'
           git push gitlab 'refs/tags/*:refs/tags/*'
