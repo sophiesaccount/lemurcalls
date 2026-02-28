@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+
 def convert_bytes(num: int) -> int:
     """Converts bytes to KB, MB, GB, TB as needed.
 
@@ -10,10 +11,11 @@ def convert_bytes(num: int) -> int:
     Returns:
         int: The converted number of bytes.
     """
-    for x in ['bytes', 'KB', 'MB', 'GB', 'TB']:
+    for x in ["bytes", "KB", "MB", "GB", "TB"]:
         if num < 1024.0:
             return "%3.2f %s" % (num, x)
         num /= 1024.0
+
 
 def count_files(path: str, name_filter: str) -> int:
     """Recursively counts the number of files with a specific name in a directory.
@@ -31,10 +33,18 @@ def count_files(path: str, name_filter: str) -> int:
     # print(convert_bytes(size))
     return count
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Count files with a specific name in a directory.")
+    parser = argparse.ArgumentParser(
+        description="Count files with a specific name in a directory."
+    )
     parser.add_argument("-p", "--path", help="Directory path to search", required=True)
-    parser.add_argument("-f", "--name_filter", help="Glob filter for files to count (e.g. '*.wav')", required=True)
+    parser.add_argument(
+        "-f",
+        "--name_filter",
+        help="Glob filter for files to count (e.g. '*.wav')",
+        required=True,
+    )
     args = parser.parse_args()
 
     file_count = count_files(args.path, args.name_filter)

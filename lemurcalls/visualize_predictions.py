@@ -16,10 +16,13 @@ from .datautils import (
     load_data,
     slice_audios_and_labels,
     FIXED_CLUSTER_CODEBOOK,
-    ID_TO_CLUSTER
+    ID_TO_CLUSTER,
 )
 from .whisperformer.train import collate_fn, nms_1d_torch
-from .whisperformer.visualization.scatterplot_ampl_snr_score import compute_snr_new, compute_snr_timebased
+from .whisperformer.visualization.scatterplot_ampl_snr_score import (
+    compute_snr_new,
+    compute_snr_timebased,
+)
 
 import librosa.display
 
@@ -50,7 +53,7 @@ def plot_spectrogram_and_scores(
     extra_offsets=None,
     extra_labels=None,
     extra_title="WhisperSeg Predictions",
-    gt_title="GT Labels with Quality Classes"
+    gt_title="GT Labels with Quality Classes",
 ):
     """Plot mel spectrogram with model scores, ground truth, and optional extra labels.
 
@@ -95,16 +98,22 @@ def plot_spectrogram_and_scores(
     colors = plt.cm.Set2(np.linspace(0, 1, num_classes))
     color_map = {i: colors[i % len(colors)] for i in range(num_classes)}
 
-    color_map = {0: 'darkorange', 1: 'cornflowerblue', 2: 'gold', 3: 'r'}
-    map = {'m': 'moan','h': 'hmm', 'w': 'wail'}
+    color_map = {0: "darkorange", 1: "cornflowerblue", 2: "gold", 3: "r"}
+    map = {"m": "moan", "h": "hmm", "w": "wail"}
     unique_labels = ["m", "h", "w"]
 
     # 4 rows if extra labels exist, otherwise 3
-    has_extra = extra_onsets is not None and extra_offsets is not None and extra_labels is not None
+    has_extra = (
+        extra_onsets is not None
+        and extra_offsets is not None
+        and extra_labels is not None
+    )
     nrows = 4 if has_extra else 3
     height_ratios = [3, 1, 0.6] + ([0.6] if has_extra else [])
 
-    fig, axs = plt.subplots(nrows, 1, figsize=(12, 7 if has_extra else 6), height_ratios=height_ratios)
+    fig, axs = plt.subplots(
+        nrows, 1, figsize=(12, 7 if has_extra else 6), height_ratios=height_ratios
+    )
     if nrows == 3:
         ax_spec, ax_scores, ax_gt = axs
     else:
@@ -125,11 +134,11 @@ def plot_spectrogram_and_scores(
         cmap=plt.cm.magma,
         sr=16000,
         hop_length=160,
-        x_axis='time',
-        y_axis='mel',  # <-- sorgt für die richtige Mel-Skala
+        x_axis="time",
+        y_axis="mel",  # <-- sorgt für die richtige Mel-Skala
         fmin=0,
         fmax=8000,
-        ax=ax_spec
+        ax=ax_spec,
     )
     ax_spec.set_ylabel("Frequency (Hz)")
 
@@ -140,13 +149,15 @@ def plot_spectrogram_and_scores(
             time_axis,
             class_scores[:, c],
             width=frame_width,
-            align='edge',
+            align="edge",
             alpha=1,
             label=f"{map[ID_TO_CLUSTER[c]]}",
-            color=color_map[c]
+            color=color_map[c],
         )
 
-    ax_scores.axhline(y=threshold, color='r', linestyle='--', label=f"Threshold {threshold}")
+    ax_scores.axhline(
+        y=threshold, color="r", linestyle="--", label=f"Threshold {threshold}"
+    )
     ax_scores.set_ylim(0, 1.1)
     ax_scores.set_title("WhisperFormer Scores and Labels")
     ax_scores.set_xlabel("Time (s)")
@@ -160,16 +171,18 @@ def plot_spectrogram_and_scores(
         mid = (onset + offset) / 2
 
         # Calculate SNR
-        sr=16000
+        sr = 16000
         start_sample = int(onset * sr)
         end_sample = int(offset * sr)
         segment_audio = y
         snr_value = compute_snr_new(segment_audio, sr, cutoff=200)
         snr_value = compute_snr_timebased(segment_audio, sr, start_sample, end_sample)
 
-    patches = [mpatches.Patch(color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])) for l in unique_labels]
+    patches = [
+        mpatches.Patch(color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l]))
+        for l in unique_labels
+    ]
     ax_scores.legend(handles=patches, loc="upper right")
-
 
     # Deduplicate legend entries
     handles, labels = ax_scores.get_legend_handles_labels()
@@ -184,33 +197,40 @@ def plot_spectrogram_and_scores(
         ax_gt.set_xlabel("Time (s)")
         ax_gt.set_yticks([])
 
-        
-        #unique_labels = sorted(set(gt_classes))
+        # unique_labels = sorted(set(gt_classes))
         unique_labels = ["m", "h", "w"]
         label_colors = plt.cm.Paired(np.linspace(0, 1, len(unique_labels)))
         label_color_map = {lab: label_colors[i] for i, lab in enumerate(unique_labels)}
-        #farben_extra = farben[np.array([np.where(np.unique(gt_labels) == lab)[0][0] for lab in extra_labels])]
+        # farben_extra = farben[np.array([np.where(np.unique(gt_labels) == lab)[0][0] for lab in extra_labels])]
 
-        for onset, offset, lab, q in zip(gt_onsets, gt_offsets, gt_classes, gt_qualities):
-            #color = label_color_map[lab]
+        for onset, offset, lab, q in zip(
+            gt_onsets, gt_offsets, gt_classes, gt_qualities
+        ):
+            # color = label_color_map[lab]
             color = color_map[FIXED_CLUSTER_CODEBOOK[lab]]
             ax_gt.axvspan(onset, offset, color=color, alpha=0.4)
             mid = (onset + offset) / 2
             ax_gt.text(
-                mid, 0.5, str(q),
-                ha='center',
-                va='center',
+                mid,
+                0.5,
+                str(q),
+                ha="center",
+                va="center",
                 fontsize=8,
-                fontweight='bold',
-                color='black',
-                bbox=dict(facecolor='white', edgecolor='none', alpha=0.7, pad=0.5)
+                fontweight="bold",
+                color="black",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=0.5),
             )
 
         # Legend for GT labels
-        patches = [mpatches.Patch(color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])) for l in unique_labels]
+        patches = [
+            mpatches.Patch(
+                color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])
+            )
+            for l in unique_labels
+        ]
         ax_gt.legend(handles=patches, loc="upper right")
 
-    
     # 4) Extra labels (optional)
     if has_extra:
         ax_extra.set_title(extra_title)
@@ -219,17 +239,17 @@ def plot_spectrogram_and_scores(
         ax_extra.set_xlabel("Time (s)")
         ax_extra.set_yticks([])
 
-        #unique_labels = sorted(set(extra_labels))
+        # unique_labels = sorted(set(extra_labels))
         unique_labels = ["m", "h", "w"]
         label_colors = plt.cm.Paired(np.linspace(0, 1, len(unique_labels)))
         label_color_map = {lab: label_colors[i] for i, lab in enumerate(unique_labels)}
-        #farben_extra = farben[np.array([np.where(np.unique(gt_labels) == lab)[0][0] for lab in extra_labels])]
+        # farben_extra = farben[np.array([np.where(np.unique(gt_labels) == lab)[0][0] for lab in extra_labels])]
 
         for onset, offset, lab in zip(extra_onsets, extra_offsets, extra_labels):
-            #color = label_color_map[lab]
+            # color = label_color_map[lab]
             color = color_map[FIXED_CLUSTER_CODEBOOK[lab]]
             ax_extra.axvspan(onset, offset, color=color, alpha=0.4)
-            mid = (onset + offset) 
+            mid = onset + offset
             """
             ax_extra.text(
                 mid, 0.5, str(lab),
@@ -243,7 +263,12 @@ def plot_spectrogram_and_scores(
             """
 
         # Legend for extra labels
-        patches = [mpatches.Patch(color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])) for l in unique_labels]
+        patches = [
+            mpatches.Patch(
+                color=color_map[FIXED_CLUSTER_CODEBOOK[l]], label=str(map[l])
+            )
+            for l in unique_labels
+        ]
         ax_extra.legend(handles=patches, loc="upper right")
 
     plt.tight_layout()
@@ -252,9 +277,11 @@ def plot_spectrogram_and_scores(
     save_path = os.path.join(save_dir, save_filename)
     plt.savefig(save_path, dpi=150)
     plt.close()
-    #print(f"Segment plot saved to {save_path}")
+    # print(f"Segment plot saved to {save_path}")
+
 
 # ==================== MODEL LOADING ====================
+
 
 def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_size=None):
     """Load a trained WhisperFormer model from a checkpoint.
@@ -280,16 +307,23 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
         ``WhisperFormer`` in eval mode and *detected_size* is ``"base"`` or
         ``"large"``.
     """
-    from .whisperformer.model import infer_architecture_from_state_dict, detect_whisper_size_from_state_dict
+    from .whisperformer.model import (
+        infer_architecture_from_state_dict,
+        detect_whisper_size_from_state_dict,
+    )
 
     # 1) Load state dict
     state_dict = torch.load(checkpoint_path, map_location=device)
 
     # 2) Infer architecture from checkpoint
-    num_decoder_layers, num_head_layers, ckpt_num_classes = infer_architecture_from_state_dict(state_dict)
+    num_decoder_layers, num_head_layers, ckpt_num_classes = (
+        infer_architecture_from_state_dict(state_dict)
+    )
     if ckpt_num_classes is not None:
         num_classes = ckpt_num_classes
-    print(f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}")
+    print(
+        f"Checkpoint: num_decoder_layers={num_decoder_layers}, num_head_layers={num_head_layers}, num_classes={num_classes}"
+    )
 
     # 3) Determine Whisper size
     if whisper_size and whisper_size.lower() in ["base", "large"]:
@@ -316,7 +350,12 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
     whisper_model = WhisperModel(config)  # empty weights, no download
     encoder = whisper_model.encoder
 
-    model = WhisperFormer(encoder, num_classes=num_classes, num_decoder_layers=num_decoder_layers, num_head_layers=num_head_layers)
+    model = WhisperFormer(
+        encoder,
+        num_classes=num_classes,
+        num_decoder_layers=num_decoder_layers,
+        num_head_layers=num_head_layers,
+    )
 
     # 4) Prefix fix: checkpoint has "encoder.X", model expects "encoder.encoder.X"
     #    due to the WhisperEncoder wrapper in the WhisperFormer model
@@ -342,7 +381,10 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device, whisper_siz
 
 # ==================== INFERENCE ====================
 
-def run_inference_new(model, dataloader, device, threshold, iou_threshold, metadata_list):
+
+def run_inference_new(
+    model, dataloader, device, threshold, iou_threshold, metadata_list
+):
     """Run inference and map each prediction to its corresponding slice.
 
     Iterates over the dataloader, applies the model with optional mixed-precision,
@@ -380,8 +422,14 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                     batch[k] = v.to(device, non_blocking=True)
 
             # Enable autocast only on CUDA
-            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (hasattr(device, "type") and device.type == "cuda")
-            autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+            use_autocast = (isinstance(device, str) and device.startswith("cuda")) or (
+                hasattr(device, "type") and device.type == "cuda"
+            )
+            autocast_ctx = (
+                torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+                if use_autocast
+                else contextlib.nullcontext()
+            )
 
             with autocast_ctx:
                 class_preds, regr_preds = model(batch["input_features"])
@@ -400,7 +448,7 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
                         score = class_probs[b, t, c]
                         if float(score) > threshold:
                             start = t - regr_preds[b, t, 0]
-                            end   = t + regr_preds[b, t, 1]
+                            end = t + regr_preds[b, t, 1]
                             intervals.append(torch.stack([start, end, score]))
 
                     if len(intervals) > 0:
@@ -413,11 +461,13 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold, metad
 
                     preds_per_class.append({"class": c, "intervals": intervals})
 
-                preds_by_slice.append({
-                    "original_idx": meta["original_idx"],
-                    "segment_idx": meta["segment_idx"],
-                    "preds": preds_per_class
-                })
+                preds_by_slice.append(
+                    {
+                        "original_idx": meta["original_idx"],
+                        "segment_idx": meta["segment_idx"],
+                        "preds": preds_per_class,
+                    }
+                )
 
     # Sanity check: number of slices must match
     assert len(preds_by_slice) == len(metadata_list), (
@@ -461,13 +511,13 @@ def reconstruct_predictions(preds_by_slice, total_spec_columns, ID_TO_CLUSTER):
             offset_cols = seg["segment_idx"] * cols_per_segment
             for p in seg["preds"]:
                 c = p["class"]
-                for (start_col, end_col, score) in p["intervals"]:
+                for start_col, end_col, score in p["intervals"]:
                     start_sec = (offset_cols + start_col) * sec_per_col
-                    end_sec   = (offset_cols + end_col)   * sec_per_col
+                    end_sec = (offset_cols + end_col) * sec_per_col
                     all_preds_final["onset"].append(float(start_sec))
                     all_preds_final["offset"].append(float(end_sec))
                     # Map class ID -> cluster label
-                    #all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
+                    # all_preds_final["cluster"].append(ID_TO_CLUSTER[c] if c in range(len(ID_TO_CLUSTER)) else "unknown")
                     all_preds_final["cluster"].append(ID_TO_CLUSTER.get(c, "unknown"))
                     all_preds_final["score"].append(float(score))
 
@@ -490,13 +540,20 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0.35)
     parser.add_argument("--iou_threshold", type=float, default=0.4)
     parser.add_argument("--overlap_tolerance", type=float, default=0.1)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     parser.add_argument("--low_quality_value", type=float, default=0.5)
     parser.add_argument("--value_q2", type=float, default=1)
     parser.add_argument("--centerframe_size", type=float, default=0.6)
-    parser.add_argument("--allowed_qualities", default = [1,2,3])
-    parser.add_argument("--whisper_size", type=str, default=None, choices=["base", "large"],
-                        help="Whisper size (base/large). Auto-detected from checkpoint if not specified.")
+    parser.add_argument("--allowed_qualities", default=[1, 2, 3])
+    parser.add_argument(
+        "--whisper_size",
+        type=str,
+        default=None,
+        choices=["base", "large"],
+        help="Whisper size (base/large). Auto-detected from checkpoint if not specified.",
+    )
     args = parser.parse_args()
 
     # === Create timestamped output subdirectory ===
@@ -510,15 +567,19 @@ if __name__ == "__main__":
         json.dump(vars(args), f, indent=2)
     print(f"Arguments saved to: {args_path}")
 
-    #os.makedirs(args.output_dir, exist_ok=True)
+    # os.makedirs(args.output_dir, exist_ok=True)
 
-    audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+        args.audio_folder, args.label_folder
+    )
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
     model, detected_size = load_trained_whisperformer(
-        args.checkpoint_path, args.num_classes,
-        args.device, whisper_size=args.whisper_size
+        args.checkpoint_path,
+        args.num_classes,
+        args.device,
+        whisper_size=args.whisper_size,
     )
     print(f"Model loaded (Whisper {detected_size})")
 
@@ -526,29 +587,46 @@ if __name__ == "__main__":
     _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     _whisper_models_dir = os.path.join(_project_root, "whisper_models")
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
-        os.path.join(_whisper_models_dir, "whisper_base"),
-        local_files_only=True
+        os.path.join(_whisper_models_dir, "whisper_base"), local_files_only=True
     )
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
-    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": []}
+    all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
 
     for audio_path, label_path in zip(audio_paths, label_paths):
-        #print(f"\n===== Processing {os.path.basename(audio_path)} =====")
-        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
-        audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+        # print(f"\n===== Processing {os.path.basename(audio_path)} =====")
+        audio_list, label_list = load_data(
+            [audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1
+        )
+        audio_list, label_list, metadata_list = slice_audios_and_labels(
+            audio_list, label_list, args.total_spec_columns
+        )
 
-        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes, args.low_quality_value, args.value_q2, args.centerframe_size)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
-                                collate_fn=collate_fn, drop_last=False)
+        dataset = WhisperFormerDatasetQuality(
+            audio_list,
+            label_list,
+            args.total_spec_columns,
+            feature_extractor,
+            args.num_classes,
+            args.low_quality_value,
+            args.value_q2,
+            args.centerframe_size,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            drop_last=False,
+        )
 
         preds_by_slice = run_inference_new(
-        model=model,
-        dataloader=dataloader,          # muss mit shuffle=False erstellt sein
-        device=args.device,
-        threshold=args.threshold,
-        iou_threshold=args.iou_threshold,
-        metadata_list=metadata_list     # kommt aus slice_audios_and_labels
+            model=model,
+            dataloader=dataloader,  # muss mit shuffle=False erstellt sein
+            device=args.device,
+            threshold=args.threshold,
+            iou_threshold=args.iou_threshold,
+            metadata_list=metadata_list,  # kommt aus slice_audios_and_labels
         )
         # Load audio
         y, sr = librosa.load(audio_path, sr=16000)
@@ -556,7 +634,7 @@ if __name__ == "__main__":
         # Load labels
         with open(label_path, "r") as f:
             labels = json.load(f)
-        
+
         clusters = labels["cluster"]
         labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
@@ -578,7 +656,9 @@ if __name__ == "__main__":
                 pred_path = matching_files[0]  # Take the first matching file
                 with open(pred_path, "r") as f:
                     pred_labels_data = json.load(f)
-                print(f"Loaded WhisperFormer predictions for {base_name} from {pred_path}")
+                print(
+                    f"Loaded WhisperFormer predictions for {base_name} from {pred_path}"
+                )
             else:
                 print(f"No matching WhisperFormer predictions found for {base_name}")
 
@@ -598,11 +678,10 @@ if __name__ == "__main__":
             else:
                 print(f"No matching extra labels found for {base_name}")
 
-
         # === Visualize first 3 segments with ground truth ===
         if len(dataset) > 0:
             base_name = os.path.splitext(os.path.basename(audio_path))[0]
-            #print(f"Visualizing first 3 segments of {base_name} with ground truth ...")
+            # print(f"Visualizing first 3 segments of {base_name} with ground truth ...")
 
             # Load labels for the entire file
             gt_onsets = np.array(labels["onset"])
@@ -611,13 +690,15 @@ if __name__ == "__main__":
             gt_qualities = np.array(labels["quality"])
 
             # Duration per segment (seconds)
-            seg_dur = (args.total_spec_columns / 2) * 0.02  # Whisper T/2 frames -> 20 ms/frame
+            seg_dur = (
+                args.total_spec_columns / 2
+            ) * 0.02  # Whisper T/2 frames -> 20 ms/frame
             for i in range(min(3, len(dataset))):
                 seg_start = i * seg_dur
                 seg_end = (i + 1) * seg_dur
 
                 # Crop audio to segment
-                y_part = y[int(seg_start*sr) : int(seg_end*sr)]
+                y_part = y[int(seg_start * sr) : int(seg_end * sr)]
 
                 # Select ground truth events within this segment
                 in_seg = (gt_onsets < seg_end) & (gt_offsets > seg_start)
@@ -632,10 +713,10 @@ if __name__ == "__main__":
                     pred_labels = np.array([])
                     pred_scores = np.array([])
                 else:
-                    pred_onsets  = np.array(pred_labels_data.get("onset", []))
+                    pred_onsets = np.array(pred_labels_data.get("onset", []))
                     pred_offsets = np.array(pred_labels_data.get("offset", []))
-                    pred_labels  = np.array(pred_labels_data.get("cluster", []))
-                    pred_scores  = np.array(pred_labels_data.get("score", []))
+                    pred_labels = np.array(pred_labels_data.get("cluster", []))
+                    pred_scores = np.array(pred_labels_data.get("score", []))
 
                 # Segment filter
                 in_seg = (pred_onsets < seg_end) & (pred_offsets > seg_start)
@@ -667,30 +748,29 @@ if __name__ == "__main__":
                     extra_onsets = np.array([])
                     extra_offsets = np.array([])
                     extra_labels = np.array([])
-                    #pred_scores = np.array([])
+                    # pred_scores = np.array([])
                 else:
-                    extra_onsets  = np.array(extra_labels_data.get("onset", []))
+                    extra_onsets = np.array(extra_labels_data.get("onset", []))
                     extra_offsets = np.array(extra_labels_data.get("offset", []))
-                    extra_labels  = np.array(extra_labels_data.get("cluster", []))
-                    #_scores  = np.array(extra_labels_data.get("score", []))
-                
+                    extra_labels = np.array(extra_labels_data.get("cluster", []))
+                    # _scores  = np.array(extra_labels_data.get("score", []))
+
                 in_seg = (extra_onsets < seg_end) & (extra_offsets > seg_start)
                 extra_onsets_seg = extra_onsets[in_seg] - seg_start
                 extra_offsets_seg = extra_offsets[in_seg] - seg_start
                 extra_labels_seg = extra_labels[in_seg]
-                  
-                    
 
                 # Get input features (mel spectrogram)
-                features = dataset[i]["input_features"].squeeze(0).cpu().numpy()  # (80, 3000)
+                features = (
+                    dataset[i]["input_features"].squeeze(0).cpu().numpy()
+                )  # (80, 3000)
                 mel_spec = features
 
                 # Model scores
                 with torch.no_grad():
                     x = dataset[i]["input_features"].unsqueeze(0).to(args.device)
                     class_preds, _ = model(x)
-                    class_scores = torch.sigmoid(class_preds).squeeze(0).cpu().numpy()                
-
+                    class_scores = torch.sigmoid(class_preds).squeeze(0).cpu().numpy()
 
                 plot_spectrogram_and_scores(
                     mel_spec=mel_spec,
@@ -712,4 +792,3 @@ if __name__ == "__main__":
                     extra_offsets=extra_offsets_seg,
                     extra_labels=extra_labels_seg,
                 )
-

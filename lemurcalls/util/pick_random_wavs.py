@@ -22,7 +22,11 @@ def pick_random_files(file_path: str, output_path: str, num_files: int) -> List:
     """
     files = []
     for f in get_flex_file_iterator(file_path, rglob_str="*.wav"):
-        if Path(f).is_file() and Path(f).suffix == '.wav' and Path(f).stat().st_size > (10 * 1024 * 1024): # 10MB
+        if (
+            Path(f).is_file()
+            and Path(f).suffix == ".wav"
+            and Path(f).stat().st_size > (10 * 1024 * 1024)
+        ):  # 10MB
             files.append(f.absolute())
 
     random_files = random.sample(files, num_files)
@@ -37,11 +41,24 @@ def pick_random_files(file_path: str, output_path: str, num_files: int) -> List:
 
     return random_files
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Picks random .wav recordings from passed directory and its subdirectories, then copies them to desired output directory.")
-    parser.add_argument("-p", "--file_path", type=str, help="Path to directory containing .wav files in itself or its subdirectories", required=True)
-    parser.add_argument("-o", "--output_path", type=str, help="Path to output directory", required=True)
-    parser.add_argument("-n", "--num_files", type=int, help="Number of random files to pick", default=50)
+    parser = argparse.ArgumentParser(
+        description="Picks random .wav recordings from passed directory and its subdirectories, then copies them to desired output directory."
+    )
+    parser.add_argument(
+        "-p",
+        "--file_path",
+        type=str,
+        help="Path to directory containing .wav files in itself or its subdirectories",
+        required=True,
+    )
+    parser.add_argument(
+        "-o", "--output_path", type=str, help="Path to output directory", required=True
+    )
+    parser.add_argument(
+        "-n", "--num_files", type=int, help="Number of random files to pick", default=50
+    )
     args = parser.parse_args()
 
     files = pick_random_files(**vars(args))

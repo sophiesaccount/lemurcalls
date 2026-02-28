@@ -50,10 +50,12 @@ class LightDecoder(nn.Module):
 
     def __init__(self, d_model, num_layers=3, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
-        self.layers = nn.ModuleList([
-            LightDecoderLayer(d_model, n_heads, dim_ff, dropout)
-            for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                LightDecoderLayer(d_model, n_heads, dim_ff, dropout)
+                for _ in range(num_layers)
+            ]
+        )
         self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x):
@@ -69,11 +71,15 @@ class ClassificationHead(nn.Module):
         super().__init__()
         layers = []
         for _ in range(num_layers):
-            layers.append(nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1))
+            layers.append(
+                nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
+            )
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
         self.layers = nn.Sequential(*layers)
-        self.output_conv = nn.Conv1d(input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1)
+        self.output_conv = nn.Conv1d(
+            input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1
+        )
 
     def forward(self, x):
         x = x.transpose(1, 2)
@@ -89,7 +95,9 @@ class RegressionHead(nn.Module):
         super().__init__()
         layers = []
         for _ in range(num_layers):
-            layers.append(nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1))
+            layers.append(
+                nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
+            )
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
         self.layers = nn.Sequential(*layers)
@@ -106,13 +114,24 @@ class RegressionHead(nn.Module):
 class WhisperFormer(nn.Module):
     """Whisper encoder + light decoder + classification/regression heads."""
 
-    def __init__(self, encoder, num_classes, num_decoder_layers=3, num_head_layers=2, dropout=0.1):
+    def __init__(
+        self, encoder, num_classes, num_decoder_layers=3, num_head_layers=2, dropout=0.1
+    ):
         super().__init__()
         self.encoder = WhisperEncoder(encoder)
         d_model = encoder.config.d_model
-        self.decoder = LightDecoder(d_model=d_model, num_layers=num_decoder_layers, dropout=dropout)
-        self.class_head = ClassificationHead(input_dim=d_model, num_classes=num_classes, num_layers=num_head_layers, dropout=dropout)
-        self.regr_head = RegressionHead(input_dim=d_model, num_layers=num_head_layers, dropout=dropout)
+        self.decoder = LightDecoder(
+            d_model=d_model, num_layers=num_decoder_layers, dropout=dropout
+        )
+        self.class_head = ClassificationHead(
+            input_dim=d_model,
+            num_classes=num_classes,
+            num_layers=num_head_layers,
+            dropout=dropout,
+        )
+        self.regr_head = RegressionHead(
+            input_dim=d_model, num_layers=num_head_layers, dropout=dropout
+        )
 
     def forward(self, input_features):
         encoder_outputs = self.encoder(input_features)

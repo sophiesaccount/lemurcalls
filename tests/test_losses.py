@@ -14,8 +14,8 @@ from lemurcalls.whisperformer.losses import (
 # Focal Loss
 # ---------------------------------------------------------------------------
 
-class TestSigmoidFocalLoss:
 
+class TestSigmoidFocalLoss:
     def test_perfect_prediction_low_loss(self):
         """Loss should be near zero when predictions perfectly match targets."""
         # Large positive logits for positive targets
@@ -57,8 +57,8 @@ class TestSigmoidFocalLoss:
 # GIoU Loss
 # ---------------------------------------------------------------------------
 
-class TestGIoULoss:
 
+class TestGIoULoss:
     def test_identical_offsets_zero_loss(self):
         """Loss should be 0 when predicted and target offsets are identical."""
         offsets = torch.tensor([[1.0, 2.0], [3.0, 1.0]])
@@ -84,8 +84,8 @@ class TestGIoULoss:
 # DIoU Loss
 # ---------------------------------------------------------------------------
 
-class TestDIoULoss:
 
+class TestDIoULoss:
     def test_identical_offsets_zero_loss(self):
         offsets = torch.tensor([[2.0, 3.0], [1.0, 1.0]])
         loss = ctr_diou_loss_1d(offsets, offsets, reduction="mean")

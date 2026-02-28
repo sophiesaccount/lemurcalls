@@ -9,7 +9,10 @@ from typing import Dict, List, Union
 import librosa
 import numpy as np
 
-from .datautils_ben import get_audio_and_label_paths, get_audio_and_label_paths_from_folders
+from .datautils_ben import (
+    get_audio_and_label_paths,
+    get_audio_and_label_paths_from_folders,
+)
 from .model import WhisperSegmenterFast
 from .train import evaluate
 from ..utils import create_if_not_exists
@@ -24,7 +27,7 @@ def convert_numpy_to_regular(data: Union[np.generic, List, Dict]):
     Returns:
         Same structure with numpy types replaced by int/float/etc.
     """
-    if isinstance(data, np.generic): # numpy.int8/16/32/64, numpy.float8/16/32/64
+    if isinstance(data, np.generic):  # numpy.int8/16/32/64, numpy.float8/16/32/64
         return data.item()
     elif isinstance(data, dict):
         return {key: convert_numpy_to_regular(value) for key, value in data.items()}
@@ -33,8 +36,18 @@ def convert_numpy_to_regular(data: Union[np.generic, List, Dict]):
     else:
         return data
 
-def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_trials: int, consolidation_method: str = "clustering",
-                      max_length: int = 448, num_beams: int = 4, batch_size: int = 8, **kwargs) -> Dict:
+
+def evaluate_dataset(
+    audio_folder: str,
+    label_folder: str,
+    model_path: str,
+    num_trials: int,
+    consolidation_method: str = "clustering",
+    max_length: int = 448,
+    num_beams: int = 4,
+    batch_size: int = 8,
+    **kwargs,
+) -> Dict:
     """Evaluate a trained WhisperSeg checkpoint on a dataset.
 
     Args:
@@ -53,20 +66,33 @@ def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_
     """
     audio_list, label_list = [], []
     audio_paths, label_paths = get_audio_and_label_paths_from_folders(
-        audio_folder, label_folder)
+        audio_folder, label_folder
+    )
     for audio_path, label_path in zip(audio_paths, label_paths):
-        with open(label_path, 'r') as f:
+        with open(label_path, "r") as f:
             label = json.load(f)
-        audio, _ = librosa.load(audio_path, sr = 48000)
+        audio, _ = librosa.load(audio_path, sr=48000)
         audio_list.append(audio)
-        label_list.append(label) 
+        label_list.append(label)
 
-    segmenter = WhisperSegmenterFast(model_path = model_path,  device = "cpu")
-    if kwargs.get('identifier'):
-        cm_name = raw_data_name = kwargs['identifier']
+    segmenter = WhisperSegmenterFast(model_path=model_path, device="cpu")
+    if kwargs.get("identifier"):
+        cm_name = raw_data_name = kwargs["identifier"]
     else:
         cm_name = raw_data_name = None
-    res = evaluate(audio_list, label_list, segmenter, batch_size, max_length, num_trials, consolidation_method, num_beams, target_cluster = None, confusion_matrix=cm_name, save_cm_data=raw_data_name)
+    res = evaluate(
+        audio_list,
+        label_list,
+        segmenter,
+        batch_size,
+        max_length,
+        num_trials,
+        consolidation_method,
+        num_beams,
+        target_cluster=None,
+        confusion_matrix=cm_name,
+        save_cm_data=raw_data_name,
+    )
     all_res = {
         "segment_wise_scores": {
             "N-true-positive": res["segment_wise"][0],
@@ -74,7 +100,7 @@ def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_
             "N-positive-in-ground-truth": res["segment_wise"][2],
             "precision": res["segment_wise"][3],
             "recall": res["segment_wise"][4],
-            "F1": res["segment_wise"][5]
+            "F1": res["segment_wise"][5],
         },
         "frame_wise_scores": {
             "N-true-positive": res["frame_wise"][0],
@@ -87,18 +113,53 @@ def evaluate_dataset(audio_folder: str, label_folder: str, model_path: str, num_
     }
     return convert_numpy_to_regular(all_res)
 
+
 if __name__ == "__main__":
     logging.basicConfig()
     logging.getLogger().setLevel(logging.INFO)
 
-    parser = argparse.ArgumentParser(description="Evaluate a trained WhisperSeg checkpoint on a dataset.")
-    #parser.add_argument("-d", "--dataset_path", type=str, help="Path to the dataset to be evaluated", required=False)
-    parser.add_argument("-a","--audio_folder", type=str, help="Path to the dataset to be evaluated", required=True)
-    parser.add_argument("-l","--label_folder", type=str, help="Path to the dataset to be evaluated", required=True)
-    parser.add_argument("-m", "--model_path", type=str, help="Path to the trained model checkpoint", required=True)
-    parser.add_argument("-o", "--output_dir", type=str, help="Path to a directory where the output files will be saved", default=None)
-    parser.add_argument("-i", "--identifier", type=str, help="Unique identifier used for the output file name in case model path and dataset name are not meaningful.", default=None)
-    parser.add_argument("-n", "--num_trials", type=int, help="Number of trials", default=3)
+    parser = argparse.ArgumentParser(
+        description="Evaluate a trained WhisperSeg checkpoint on a dataset."
+    )
+    # parser.add_argument("-d", "--dataset_path", type=str, help="Path to the dataset to be evaluated", required=False)
+    parser.add_argument(
+        "-a",
+        "--audio_folder",
+        type=str,
+        help="Path to the dataset to be evaluated",
+        required=True,
+    )
+    parser.add_argument(
+        "-l",
+        "--label_folder",
+        type=str,
+        help="Path to the dataset to be evaluated",
+        required=True,
+    )
+    parser.add_argument(
+        "-m",
+        "--model_path",
+        type=str,
+        help="Path to the trained model checkpoint",
+        required=True,
+    )
+    parser.add_argument(
+        "-o",
+        "--output_dir",
+        type=str,
+        help="Path to a directory where the output files will be saved",
+        default=None,
+    )
+    parser.add_argument(
+        "-i",
+        "--identifier",
+        type=str,
+        help="Unique identifier used for the output file name in case model path and dataset name are not meaningful.",
+        default=None,
+    )
+    parser.add_argument(
+        "-n", "--num_trials", type=int, help="Number of trials", default=3
+    )
     args = parser.parse_args()
 
     eval_res = evaluate_dataset(**vars(args))
@@ -107,8 +168,15 @@ if __name__ == "__main__":
     else:
         out_path = args.output_dir
     if args.identifier == None:
-        out_name=os.path.join(out_path, datetime.now().strftime("%Y%m%d-%H%M%S") + f'_eval_{Path(args.model_path).stem}_{Path(args.label_folder).stem}.txt')
+        out_name = os.path.join(
+            out_path,
+            datetime.now().strftime("%Y%m%d-%H%M%S")
+            + f"_eval_{Path(args.model_path).stem}_{Path(args.label_folder).stem}.txt",
+        )
     else:
-        out_name=os.path.join(out_path, datetime.now().strftime("%Y%m%d-%H%M%S") + f'_eval_{args.identifier}.txt')
+        out_name = os.path.join(
+            out_path,
+            datetime.now().strftime("%Y%m%d-%H%M%S") + f"_eval_{args.identifier}.txt",
+        )
     with open(out_name, "w") as f:
         f.write(json.dumps(eval_res, indent=2))

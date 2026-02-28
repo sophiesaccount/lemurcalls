@@ -22,6 +22,7 @@ class WhisperEncoder(nn.Module):
         """
         return self.encoder(x)
 
+
 class LightDecoderLayer(nn.Module):
     """Single transformer decoder layer with self-attention and feed-forward block."""
 
@@ -31,12 +32,11 @@ class LightDecoderLayer(nn.Module):
         if dim_ff is None:
             dim_ff = 2 * d_model
 
-        assert d_model % n_heads == 0, \
+        assert d_model % n_heads == 0, (
             f"d_model={d_model} must be divisible by n_heads={n_heads}"
-
-        self.self_attn = nn.MultiheadAttention(
-            d_model, n_heads, batch_first=True
         )
+
+        self.self_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
 
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -45,9 +45,7 @@ class LightDecoderLayer(nn.Module):
         self.dropout_ff = nn.Dropout(dropout)
 
         self.ff = nn.Sequential(
-            nn.Linear(d_model, dim_ff),
-            nn.GELU(),
-            nn.Linear(dim_ff, d_model)
+            nn.Linear(d_model, dim_ff), nn.GELU(), nn.Linear(dim_ff, d_model)
         )
 
     def forward(self, x):
@@ -71,10 +69,12 @@ class LightDecoder(nn.Module):
     def __init__(self, d_model, num_layers=3, n_heads=4, dim_ff=None, dropout=0.1):
         super().__init__()
 
-        self.layers = nn.ModuleList([
-            LightDecoderLayer(d_model, n_heads, dim_ff, dropout)
-            for _ in range(num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                LightDecoderLayer(d_model, n_heads, dim_ff, dropout)
+                for _ in range(num_layers)
+            ]
+        )
 
         self.norm = nn.LayerNorm(d_model)
 
@@ -92,12 +92,16 @@ class ClassificationHead(nn.Module):
 
         layers = []
         for i in range(num_layers):
-            layers.append(nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1))
+            layers.append(
+                nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
+            )
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
 
         self.layers = nn.Sequential(*layers)
-        self.output_conv = nn.Conv1d(input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1)
+        self.output_conv = nn.Conv1d(
+            input_dim, num_classes, kernel_size=KERNEL_SIZE, padding=1
+        )
 
     def forward(self, x):
         """Forward pass. Input (B, T, D) -> output (B, T, num_classes)."""
@@ -115,7 +119,9 @@ class RegressionHead(nn.Module):
 
         layers = []
         for i in range(num_layers):
-            layers.append(nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1))
+            layers.append(
+                nn.Conv1d(input_dim, input_dim, kernel_size=KERNEL_SIZE, padding=1)
+            )
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
 
@@ -135,12 +141,7 @@ class WhisperFormer(nn.Module):
     """Whisper encoder + light decoder + classification and regression heads for event detection."""
 
     def __init__(
-        self,
-        encoder,
-        num_classes,
-        num_decoder_layers=3,
-        num_head_layers=2,
-        dropout=0.1
+        self, encoder, num_classes, num_decoder_layers=3, num_head_layers=2, dropout=0.1
     ):
         super().__init__()
 
@@ -148,22 +149,18 @@ class WhisperFormer(nn.Module):
         d_model = encoder.config.d_model
 
         self.decoder = LightDecoder(
-            d_model=d_model,
-            num_layers=num_decoder_layers,
-            dropout=dropout
+            d_model=d_model, num_layers=num_decoder_layers, dropout=dropout
         )
 
         self.class_head = ClassificationHead(
             input_dim=d_model,
             num_classes=num_classes,
             num_layers=num_head_layers,
-            dropout=dropout
+            dropout=dropout,
         )
 
         self.regr_head = RegressionHead(
-            input_dim=d_model,
-            num_layers=num_head_layers,
-            dropout=dropout
+            input_dim=d_model, num_layers=num_head_layers, dropout=dropout
         )
 
     def forward(self, input_features):
@@ -235,4 +232,3 @@ def detect_whisper_size_from_state_dict(state_dict):
             elif d_model == 512:
                 return "base"
     return None
-

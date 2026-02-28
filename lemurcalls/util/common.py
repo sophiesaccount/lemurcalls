@@ -10,11 +10,17 @@ def is_scheduled_job() -> bool:
     Returns:
         bool: True if the script is running as a scheduled job, False otherwise
     """
-    if environ.get("SLURM_JOB_ID", None) and environ.get("SLURM_JOB_NAME", None) != "bash":
+    if (
+        environ.get("SLURM_JOB_ID", None)
+        and environ.get("SLURM_JOB_NAME", None) != "bash"
+    ):
         return True
     return False
 
-def get_flex_file_iterator(file_path: str, rglob_str: str = "*.txt") -> Generator[Path, None, None] | List[str] | None:
+
+def get_flex_file_iterator(
+    file_path: str, rglob_str: str = "*.txt"
+) -> Generator[Path, None, None] | List[str] | None:
     """
     If the provided path is a directory: Recursively search for .txt files in it and return a generator of Path objects.
     If the provided path is a file: Return a list containing the file path.
@@ -40,7 +46,10 @@ def get_flex_file_iterator(file_path: str, rglob_str: str = "*.txt") -> Generato
         else:
             raise ValueError(f"Invalid file path: {file_path}")
 
-def compute_annotation_metadata(duration: float = None, sampling_rate: int = None, l_hop: float = None) -> float:
+
+def compute_annotation_metadata(
+    duration: float = None, sampling_rate: int = None, l_hop: float = None
+) -> float:
     """
     Given duration and sampling_rate: Compute the hop length of the spectrogram.
     Given duration and hop length: Compute the sampling rate of the audio file.
@@ -62,7 +71,10 @@ def compute_annotation_metadata(duration: float = None, sampling_rate: int = Non
     elif sampling_rate and l_hop and not duration:
         return (l_hop * 1000) / sampling_rate
     else:
-        raise ValueError("Invalid input. Provide two of the three arguments: duration, sampling_rate, l_hop")
+        raise ValueError(
+            "Invalid input. Provide two of the three arguments: duration, sampling_rate, l_hop"
+        )
+
 
 def compute_spec_time_step(sampling_rate: int, l_hop: float) -> float:
     """
@@ -77,6 +89,7 @@ def compute_spec_time_step(sampling_rate: int, l_hop: float) -> float:
         float: The computed value
     """
     return l_hop / sampling_rate
+
 
 class EarlyStopHandler:
     # adapted from: https://stackoverflow.com/a/73704579

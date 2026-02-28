@@ -24,12 +24,15 @@ def split_wavs(path):
         second_half = audio[halfway_point:]
 
         # Save halves with different names
-        first_half.export(os.path.join(path, f + '_first'), format="wav")
-        second_half.export(os.path.join(path, f + '_second'), format="wav")
+        first_half.export(os.path.join(path, f + "_first"), format="wav")
+        second_half.export(os.path.join(path, f + "_second"), format="wav")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Splits .wav files in half")
-    parser.add_argument("-p", "--path", type=str, help="Path to the .wav files", required=True)
+    parser.add_argument(
+        "-p", "--path", type=str, help="Path to the .wav files", required=True
+    )
     args = parser.parse_args()
 
     split_wavs(args.path)

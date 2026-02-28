@@ -12,6 +12,7 @@ from lemurcalls.whisperformer.dataset import WhisperFormerDatasetQuality
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_synthetic_data(duration_sec=30.0, sr=16000, n_events=3, num_classes=3):
     """Create a synthetic audio + label pair for dataset testing."""
     n_samples = int(duration_sec * sr)
@@ -52,8 +53,8 @@ def feature_extractor():
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestWhisperFormerDatasetQuality:
 
+class TestWhisperFormerDatasetQuality:
     def test_output_keys(self, feature_extractor):
         audio, label = _make_synthetic_data()
         ds = WhisperFormerDatasetQuality(
@@ -72,8 +73,14 @@ class TestWhisperFormerDatasetQuality:
         audio, label = _make_synthetic_data(num_classes=num_classes)
 
         ds = WhisperFormerDatasetQuality(
-            [audio], [label], total_spec_columns, feature_extractor,
-            num_classes, 0.0, 0.5, 0.5
+            [audio],
+            [label],
+            total_spec_columns,
+            feature_extractor,
+            num_classes,
+            0.0,
+            0.5,
+            0.5,
         )
         sample = ds[0]
 
@@ -113,7 +120,9 @@ class TestWhisperFormerDatasetQuality:
         """A clip with no events should produce all-zero clusters and segments."""
         audio = np.random.randn(480000).astype(np.float32) * 0.1
         label = {
-            "sr": 16000, "spec_time_step": 0.01, "min_frequency": 0,
+            "sr": 16000,
+            "spec_time_step": 0.01,
+            "min_frequency": 0,
             "onset": np.array([]),
             "offset": np.array([]),
             "cluster_id": np.array([], dtype=int),

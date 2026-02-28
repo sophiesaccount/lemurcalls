@@ -29,7 +29,9 @@ def get_id_to_cluster(num_classes):
         return {i: str(i) for i in range(num_classes)}
 
 
-def load_trained_whisperformer(checkpoint_path, device, whisper_config_path, whisper_size=None):
+def load_trained_whisperformer(
+    checkpoint_path, device, whisper_config_path, whisper_size=None
+):
     """Load a trained WhisperFormer model from a .pth checkpoint.
 
     Architecture (num_decoder_layers, num_head_layers, num_classes) and Whisper
@@ -46,7 +48,9 @@ def load_trained_whisperformer(checkpoint_path, device, whisper_config_path, whi
     """
     state_dict = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
-    num_decoder_layers, num_head_layers, num_classes = infer_architecture_from_state_dict(state_dict)
+    num_decoder_layers, num_head_layers, num_classes = (
+        infer_architecture_from_state_dict(state_dict)
+    )
     logging.info(
         f"Checkpoint: decoder_layers={num_decoder_layers}, "
         f"head_layers={num_head_layers}, classes={num_classes}"
@@ -57,7 +61,9 @@ def load_trained_whisperformer(checkpoint_path, device, whisper_config_path, whi
     else:
         detected_size = detect_whisper_size_from_state_dict(state_dict)
         if detected_size is None:
-            detected_size = "large" if "large" in str(checkpoint_path).lower() else "base"
+            detected_size = (
+                "large" if "large" in str(checkpoint_path).lower() else "base"
+            )
 
     config = WhisperConfig.from_pretrained(whisper_config_path)
     encoder = WhisperModel(config).encoder
@@ -75,7 +81,11 @@ def load_trained_whisperformer(checkpoint_path, device, whisper_config_path, whi
     )
     if needs_remap:
         state_dict = {
-            ("encoder." + k if k.startswith("encoder.") and not k.startswith("encoder.encoder.") else k): v
+            (
+                "encoder." + k
+                if k.startswith("encoder.") and not k.startswith("encoder.encoder.")
+                else k
+            ): v
             for k, v in state_dict.items()
         }
 
@@ -88,6 +98,7 @@ def load_trained_whisperformer(checkpoint_path, device, whisper_config_path, whi
 # ---------------------------------------------------------------------------
 # NMS
 # ---------------------------------------------------------------------------
+
 
 def nms_1d(intervals, iou_threshold):
     """Non-maximum suppression for 1-D intervals.
@@ -127,9 +138,19 @@ def nms_1d(intervals, iou_threshold):
 # Single-pass inference on one audio array
 # ---------------------------------------------------------------------------
 
-def _run_inference_single_pass(model, audio, feature_extractor, device,
-                               total_spec_columns, threshold, iou_threshold,
-                               batch_size, id_to_cluster, sample_offset=0):
+
+def _run_inference_single_pass(
+    model,
+    audio,
+    feature_extractor,
+    device,
+    total_spec_columns,
+    threshold,
+    iou_threshold,
+    batch_size,
+    id_to_cluster,
+    sample_offset=0,
+):
     """Run inference on one audio array with a given sample offset.
 
     Returns list of dicts with onset/offset/cluster/score per prediction.
@@ -149,30 +170,34 @@ def _run_inference_single_pass(model, audio, feature_extractor, device,
         clip = audio[start:end]
         if len(clip) < sr * 0.1:
             break
-        clip_padded = np.concatenate([clip, np.zeros(max(0, num_samples_in_clip - len(clip)))])
+        clip_padded = np.concatenate(
+            [clip, np.zeros(max(0, num_samples_in_clip - len(clip)))]
+        )
         clip_padded = clip_padded.astype(np.float32)
-        feats = feature_extractor(
-            clip_padded, sampling_rate=sr, padding="do_not_pad"
-        )["input_features"][0]
-        segments.append({
-            "features": torch.tensor(feats, dtype=torch.float32),
-            "seg_idx": seg_idx,
-            "start_sec": start / sr,
-        })
+        feats = feature_extractor(clip_padded, sampling_rate=sr, padding="do_not_pad")[
+            "input_features"
+        ][0]
+        segments.append(
+            {
+                "features": torch.tensor(feats, dtype=torch.float32),
+                "seg_idx": seg_idx,
+                "start_sec": start / sr,
+            }
+        )
         start += num_samples_in_clip
         seg_idx += 1
 
     if not segments:
         return []
 
-    use_autocast = (
-        device != "cpu"
-        and ((isinstance(device, str) and device.startswith("cuda"))
-             or (hasattr(device, "type") and device.type == "cuda"))
+    use_autocast = device != "cpu" and (
+        (isinstance(device, str) and device.startswith("cuda"))
+        or (hasattr(device, "type") and device.type == "cuda")
     )
     autocast_ctx = (
         torch.amp.autocast(device_type="cuda", dtype=torch.float16)
-        if use_autocast else contextlib.nullcontext()
+        if use_autocast
+        else contextlib.nullcontext()
     )
 
     predictions = []
@@ -203,12 +228,14 @@ def _run_inference_single_pass(model, audio, feature_extractor, device,
                     intervals = torch.stack(intervals)
                     intervals = nms_1d(intervals, iou_threshold)
                     for start_col, end_col, sc in intervals.cpu().tolist():
-                        predictions.append({
-                            "onset": offset_sec + start_col * sec_per_col,
-                            "offset": offset_sec + end_col * sec_per_col,
-                            "cluster": id_to_cluster.get(c, "unknown"),
-                            "score": float(sc),
-                        })
+                        predictions.append(
+                            {
+                                "onset": offset_sec + start_col * sec_per_col,
+                                "offset": offset_sec + end_col * sec_per_col,
+                                "cluster": id_to_cluster.get(c, "unknown"),
+                                "score": float(sc),
+                            }
+                        )
 
     return predictions
 
@@ -216,6 +243,7 @@ def _run_inference_single_pass(model, audio, feature_extractor, device,
 # ---------------------------------------------------------------------------
 # Consolidation across multiple offset runs
 # ---------------------------------------------------------------------------
+
 
 def _consolidate(all_runs_preds, overlap_tolerance=0.1):
     """Merge overlapping predictions from multiple runs; keep highest-score per group.
@@ -245,7 +273,9 @@ def _consolidate(all_runs_preds, overlap_tolerance=0.1):
             for j, p2 in enumerate(cpreds):
                 if i == j or j in used:
                     continue
-                inter = max(0, min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"]))
+                inter = max(
+                    0, min(p1["offset"], p2["offset"]) - max(p1["onset"], p2["onset"])
+                )
                 union = max(p1["offset"], p2["offset"]) - min(p1["onset"], p2["onset"])
                 iou = inter / union if union > 0 else 0
                 if iou > overlap_tolerance:
@@ -267,10 +297,20 @@ def _consolidate(all_runs_preds, overlap_tolerance=0.1):
 # High-level inference on a single audio
 # ---------------------------------------------------------------------------
 
-def run_inference(model, audio, feature_extractor, device, id_to_cluster,
-                  total_spec_columns=3000, threshold=0.35,
-                  iou_threshold=0.4, batch_size=4,
-                  num_runs=3, overlap_tolerance=0.1):
+
+def run_inference(
+    model,
+    audio,
+    feature_extractor,
+    device,
+    id_to_cluster,
+    total_spec_columns=3000,
+    threshold=0.35,
+    iou_threshold=0.4,
+    batch_size=4,
+    num_runs=3,
+    overlap_tolerance=0.1,
+):
     """Run WhisperFormer inference on a single audio (multi-offset + consolidation).
 
     The audio is processed multiple times with different starting offsets.
@@ -296,9 +336,16 @@ def run_inference(model, audio, feature_extractor, device, id_to_cluster,
 
     if num_runs == 1:
         preds = _run_inference_single_pass(
-            model, audio, feature_extractor, device,
-            total_spec_columns, threshold, iou_threshold,
-            batch_size, id_to_cluster, sample_offset=0,
+            model,
+            audio,
+            feature_extractor,
+            device,
+            total_spec_columns,
+            threshold,
+            iou_threshold,
+            batch_size,
+            id_to_cluster,
+            sample_offset=0,
         )
         return {
             "onset": [p["onset"] for p in preds],
@@ -310,9 +357,16 @@ def run_inference(model, audio, feature_extractor, device, id_to_cluster,
     all_runs = []
     for offset in shift_offsets:
         preds = _run_inference_single_pass(
-            model, audio, feature_extractor, device,
-            total_spec_columns, threshold, iou_threshold,
-            batch_size, id_to_cluster, sample_offset=offset,
+            model,
+            audio,
+            feature_extractor,
+            device,
+            total_spec_columns,
+            threshold,
+            iou_threshold,
+            batch_size,
+            id_to_cluster,
+            sample_offset=offset,
         )
         all_runs.append(preds)
 
@@ -323,9 +377,20 @@ def run_inference(model, audio, feature_extractor, device, id_to_cluster,
 # Top-level: process all WAV files in a directory
 # ---------------------------------------------------------------------------
 
-def infer(data_dir, checkpoint_path, whisper_config_path, output_dir,
-          threshold=0.35, iou_threshold=0.4, total_spec_columns=3000,
-          batch_size=4, num_runs=3, overlap_tolerance=0.1, device=None):
+
+def infer(
+    data_dir,
+    checkpoint_path,
+    whisper_config_path,
+    output_dir,
+    threshold=0.35,
+    iou_threshold=0.4,
+    total_spec_columns=3000,
+    batch_size=4,
+    num_runs=3,
+    overlap_tolerance=0.1,
+    device=None,
+):
     """Run WhisperFormer inference on all WAV files in a directory.
 
     Args:
@@ -377,7 +442,11 @@ def infer(data_dir, checkpoint_path, whisper_config_path, output_dir,
         audio, _ = librosa.load(wav_path, sr=16000)
 
         preds = run_inference(
-            model, audio, feature_extractor, device, id_to_cluster,
+            model,
+            audio,
+            feature_extractor,
+            device,
+            id_to_cluster,
             total_spec_columns=total_spec_columns,
             threshold=threshold,
             iou_threshold=iou_threshold,

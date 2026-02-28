@@ -24,9 +24,16 @@ def fetch_sr_rounded(wav_path: str) -> int:
     return round(wavfile.read(wav_path)[0], -2)
 
 
-def infer(data_dir: str, model_path: str, output_dir: str,
-          min_frequency: int, spec_time_step: float,
-          min_segment_length: float, eps: float, num_trials: int):
+def infer(
+    data_dir: str,
+    model_path: str,
+    output_dir: str,
+    min_frequency: int,
+    spec_time_step: float,
+    min_segment_length: float,
+    eps: float,
+    num_trials: int,
+):
     """Run WhisperSeg inference on all WAV files in a directory.
 
     Args:

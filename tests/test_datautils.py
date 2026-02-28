@@ -18,6 +18,7 @@ from lemurcalls.whisperseg.datautils_ben import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_audio_and_label(duration_sec=5.0, sr=16000, n_events=3):
     """Create a synthetic audio array and a matching label dict."""
     n_samples = int(duration_sec * sr)
@@ -49,6 +50,7 @@ def _make_audio_and_label(duration_sec=5.0, sr=16000, n_events=3):
 # Tests: FIXED_CLUSTER_CODEBOOK / ID_TO_CLUSTER consistency
 # ---------------------------------------------------------------------------
 
+
 def test_codebook_and_id_mapping_are_consistent():
     """ID_TO_CLUSTER should map every value in FIXED_CLUSTER_CODEBOOK back."""
     for cluster_name, cluster_id in FIXED_CLUSTER_CODEBOOK.items():
@@ -66,6 +68,7 @@ def test_id_to_cluster_values_are_strings():
 # ---------------------------------------------------------------------------
 # Tests: slice_audios_and_labels
 # ---------------------------------------------------------------------------
+
 
 def test_slice_returns_correct_types():
     """Slicing should return lists of arrays, labels, and metadata dicts."""
@@ -131,9 +134,14 @@ def test_slice_empty_audio():
     """Slicing an empty audio should return empty lists."""
     audio = np.array([], dtype=np.float32)
     label = {
-        "sr": 16000, "spec_time_step": 0.01, "min_frequency": 0,
-        "onset": np.array([]), "offset": np.array([]),
-        "cluster": [], "cluster_id": np.array([]), "quality": [],
+        "sr": 16000,
+        "spec_time_step": 0.01,
+        "min_frequency": 0,
+        "onset": np.array([]),
+        "offset": np.array([]),
+        "cluster": [],
+        "cluster_id": np.array([]),
+        "quality": [],
     }
     audios, labels, metas = slice_audios_and_labels([audio], [label], 3000)
     assert len(audios) == 0
@@ -151,6 +159,7 @@ def test_slice_short_audio_single_segment():
 # ---------------------------------------------------------------------------
 # Tests: get_codebook_for_classes
 # ---------------------------------------------------------------------------
+
 
 class TestGetCodebookForClasses:
     """Tests for the num_classes-dependent codebook factory."""
@@ -214,6 +223,7 @@ class TestGetCodebookForClasses:
 # ---------------------------------------------------------------------------
 # Tests: get_codebook_for_classes (WhisperSeg variant)
 # ---------------------------------------------------------------------------
+
 
 class TestGetCodebookForClassesWhisperSeg:
     """Tests for the WhisperSeg num_classes-dependent codebook factory."""

@@ -16,7 +16,7 @@ from ..datautils import (
     load_data,
     slice_audios_and_labels,
     FIXED_CLUSTER_CODEBOOK,
-    ID_TO_CLUSTER
+    ID_TO_CLUSTER,
 )
 from ..whisperformer.train import collate_fn
 import matplotlib.pyplot as plt
@@ -24,6 +24,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 
 # ==================== MODEL LOADING ====================
+
 
 def load_trained_whisperformer(checkpoint_path, num_classes, device):
     """Load a trained WhisperFormer from checkpoint.
@@ -36,7 +37,9 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
     Returns:
         WhisperFormer model in eval mode.
     """
-    whisper_model = WhisperModel.from_pretrained("openai/whisper-small", local_files_only=True)
+    whisper_model = WhisperModel.from_pretrained(
+        "openai/whisper-small", local_files_only=True
+    )
     encoder = whisper_model.encoder
     model = WhisperFormer(encoder, num_classes=num_classes)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
@@ -45,8 +48,8 @@ def load_trained_whisperformer(checkpoint_path, num_classes, device):
     return model
 
 
-
 # ==================== NMS ====================
+
 
 def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
     """Non-maximum suppression for 1D intervals (start, end, score). Keeps high-score non-overlapping intervals.
@@ -85,6 +88,7 @@ def nms_1d_torch(intervals: torch.Tensor, iou_threshold):
 
 # ==================== INFERENCE ====================
 
+
 def run_inference_new(model, dataloader, device, threshold, iou_threshold):
     all_preds = []
     with torch.no_grad():
@@ -116,33 +120,33 @@ def run_inference_new(model, dataloader, device, threshold, iou_threshold):
                         else:
                             kept = []
 
-                        all_preds.append({
-                            "batch": b,
-                            "class": c,
-                            "intervals": kept
-                        })
+                        all_preds.append({"batch": b, "class": c, "intervals": kept})
     return all_preds
 
 
 # ==================== METRICS ====================
 
 
-def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.001):
+def evaluate_detection_metrics_with_false_class(
+    labels, predictions, overlap_tolerance=0.001
+):
     """Compute TP, FP, FN, FC, precision, recall, F1 (basic version, no fp_scores/fn_qualities)."""
-    label_onsets = np.array(labels['onset'])
-    label_offsets = np.array(labels['offset'])
-    label_clusters = np.array(labels['cluster'])
+    label_onsets = np.array(labels["onset"])
+    label_offsets = np.array(labels["offset"])
+    label_clusters = np.array(labels["cluster"])
 
-    pred_onsets = np.array(predictions['onset'])
-    pred_offsets = np.array(predictions['offset'])
-    pred_clusters = np.array(predictions['cluster'])
+    pred_onsets = np.array(predictions["onset"])
+    pred_offsets = np.array(predictions["offset"])
+    pred_clusters = np.array(predictions["cluster"])
 
     matched_labels = set()
     matched_preds = set()
     false_class = 0
 
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
-        for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
+        for l_idx, (lo, lf, lc) in enumerate(
+            zip(label_onsets, label_offsets, label_clusters)
+        ):
             if l_idx in matched_labels or p_idx in matched_preds:
                 continue
             intersection = max(0, min(pf, lf) - max(po, lo))
@@ -161,30 +165,44 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
     fc = false_class
     precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0
     recall = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    f1 = (
+        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    )
 
-    return {'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
-            'precision': precision, 'recall': recall, 'f1': f1}
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "fc": fc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }
 
-def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tolerance=0.001):
-    label_onsets = np.array(labels['onset'])
-    label_offsets = np.array(labels['offset'])
-    label_clusters = np.array(labels['cluster'])
-    label_qualities = np.array(labels.get('quality', ['unknown'] * len(label_onsets)))
 
-    pred_onsets = np.array(predictions['onset'])
-    pred_offsets = np.array(predictions['offset'])
-    pred_clusters = np.array(predictions['cluster'])
-    pred_scores = np.array(predictions.get('score', [0.0] * len(pred_onsets)))
+def evaluate_detection_metrics_with_false_class(
+    labels, predictions, overlap_tolerance=0.001
+):
+    label_onsets = np.array(labels["onset"])
+    label_offsets = np.array(labels["offset"])
+    label_clusters = np.array(labels["cluster"])
+    label_qualities = np.array(labels.get("quality", ["unknown"] * len(label_onsets)))
+
+    pred_onsets = np.array(predictions["onset"])
+    pred_offsets = np.array(predictions["offset"])
+    pred_clusters = np.array(predictions["cluster"])
+    pred_scores = np.array(predictions.get("score", [0.0] * len(pred_onsets)))
 
     matched_labels = set()
     matched_preds = set()
     false_class = 0
-    fp_scores = []           # Scores of all false positives
-    fn_qualities = []        # Quality classes of all false negatives
+    fp_scores = []  # Scores of all false positives
+    fn_qualities = []  # Quality classes of all false negatives
 
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
-        for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
+        for l_idx, (lo, lf, lc) in enumerate(
+            zip(label_onsets, label_offsets, label_clusters)
+        ):
             if l_idx in matched_labels or p_idx in matched_preds:
                 continue
             intersection = max(0, min(pf, lf) - max(po, lo))
@@ -214,21 +232,26 @@ def evaluate_detection_metrics_with_false_class(labels, predictions, overlap_tol
 
     precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0
     recall = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    f1 = (
+        2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    )
 
     return {
-        'tp': tp,
-        'fp': fp,
-        'fn': fn,
-        'fc': fc,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'fp_scores': fp_scores,
-        'fn_qualities': fn_qualities
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "fc": fc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "fp_scores": fp_scores,
+        "fn_qualities": fn_qualities,
     }
 
-def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, overlap_tolerance=0.001, allowed_qualities={1, 2}):
+
+def evaluate_detection_metrics_with_false_class_qualities(
+    labels, predictions, overlap_tolerance=0.001, allowed_qualities={1, 2}
+):
     """Compute detection metrics (TP, FP, FN, FC, precision, recall, F1) with optional quality filtering.
 
     If allowed_qualities is set, ground-truth labels are filtered to those quality values before matching.
@@ -243,11 +266,11 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         dict: gtp, pp, tp, fp, fn, fc, precision, recall, f1.
     """
     # If quality filter is set: filter GT
-    label_onsets   = labels['onset']
-    label_offsets  = labels['offset']
-    label_clusters = labels['cluster']
-    label_qualities = labels['quality']
-    #print(label_qualities)
+    label_onsets = labels["onset"]
+    label_offsets = labels["offset"]
+    label_clusters = labels["cluster"]
+    label_qualities = labels["quality"]
+    # print(label_qualities)
 
     if allowed_qualities is not None:
         # Normalize to strings so that {1,2} or {"1","2"} both work
@@ -255,28 +278,28 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
         qual_str = np.array([str(q) for q in label_qualities])
         mask = np.array([q in allowed_str for q in qual_str], dtype=bool)
 
-
         label_onsets = np.array(label_onsets)[mask]
         label_offsets = np.array(label_offsets)[mask]
         label_clusters = np.array(label_clusters)[mask]
         # label_qualities not needed after this
 
     # Load predictions
-    pred_onsets = np.array(predictions['onset'])
-    pred_offsets = np.array(predictions['offset'])
-    pred_clusters = np.array(predictions['cluster'])
+    pred_onsets = np.array(predictions["onset"])
+    pred_offsets = np.array(predictions["offset"])
+    pred_clusters = np.array(predictions["cluster"])
 
-    
     matched_labels = set()
     matched_preds = set()
     false_class = 0
 
-    gtp = len(label_onsets)      # Now only quality in allowed set
-    pp  = len(pred_onsets)
+    gtp = len(label_onsets)  # Now only quality in allowed set
+    pp = len(pred_onsets)
 
     # Matching
     for p_idx, (po, pf, pc) in enumerate(zip(pred_onsets, pred_offsets, pred_clusters)):
-        for l_idx, (lo, lf, lc) in enumerate(zip(label_onsets, label_offsets, label_clusters)):
+        for l_idx, (lo, lf, lc) in enumerate(
+            zip(label_onsets, label_offsets, label_clusters)
+        ):
             if l_idx in matched_labels or p_idx in matched_preds:
                 continue
             inter = max(0.0, min(pf, lf) - max(po, lo))
@@ -295,13 +318,23 @@ def evaluate_detection_metrics_with_false_class_qualities(labels, predictions, o
     fc = false_class
 
     precision = tp / (tp + fp + fc) if (tp + fp + fc) > 0 else 0.0
-    recall    = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0.0
-    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    recall = tp / (tp + fn + fc) if (tp + fn + fc) > 0 else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall) > 0
+        else 0.0
+    )
 
     return {
-        'gtp': gtp, 'pp': pp,
-        'tp': tp, 'fp': fp, 'fn': fn, 'fc': fc,
-        'precision': precision, 'recall': recall, 'f1': f1
+        "gtp": gtp,
+        "pp": pp,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "fc": fc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
     }
 
 
@@ -318,7 +351,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_classes", type=int, default=1)
     parser.add_argument("--threshold", type=float, default=0.35)
     parser.add_argument("--iou_threshold", type=float, default=0.1)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+    )
     args = parser.parse_args()
 
     # Create timestamped subfolder
@@ -332,36 +367,61 @@ if __name__ == "__main__":
         json.dump(vars(args), f, indent=2)
     print(f"Arguments saved to: {args_path}")
 
-    #os.makedirs(args.output_dir, exist_ok=True)
+    # os.makedirs(args.output_dir, exist_ok=True)
 
-    audio_paths, label_paths = get_audio_and_label_paths_from_folders(args.audio_folder, args.label_folder)
+    audio_paths, label_paths = get_audio_and_label_paths_from_folders(
+        args.audio_folder, args.label_folder
+    )
     cluster_codebook = FIXED_CLUSTER_CODEBOOK
     id_to_cluster = ID_TO_CLUSTER
 
-    model = load_trained_whisperformer(args.checkpoint_path, args.num_classes, args.device)
-    feature_extractor = WhisperFeatureExtractor.from_pretrained("openai/whisper-small", local_files_only=True)
+    model = load_trained_whisperformer(
+        args.checkpoint_path, args.num_classes, args.device
+    )
+    feature_extractor = WhisperFeatureExtractor.from_pretrained(
+        "openai/whisper-small", local_files_only=True
+    )
 
     all_labels = {"onset": [], "offset": [], "cluster": [], "quality": []}
-    all_preds_final  = {"onset": [], "offset": [], "cluster": [], "score": []}
+    all_preds_final = {"onset": [], "offset": [], "cluster": [], "score": []}
 
     for audio_path, label_path in zip(audio_paths, label_paths):
         print(f"\n===== Processing {os.path.basename(audio_path)} =====")
-        audio_list, label_list = load_data([audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1)
-        audio_list, label_list, metadata_list = slice_audios_and_labels(audio_list, label_list, args.total_spec_columns)
+        audio_list, label_list = load_data(
+            [audio_path], [label_path], cluster_codebook=cluster_codebook, n_threads=1
+        )
+        audio_list, label_list, metadata_list = slice_audios_and_labels(
+            audio_list, label_list, args.total_spec_columns
+        )
 
-        dataset = WhisperFormerDatasetQuality(audio_list, label_list, args.total_spec_columns, feature_extractor, args.num_classes)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
-                                collate_fn=collate_fn, drop_last=False)
+        dataset = WhisperFormerDatasetQuality(
+            audio_list,
+            label_list,
+            args.total_spec_columns,
+            feature_extractor,
+            args.num_classes,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            drop_last=False,
+        )
 
-        all_preds = run_inference_new(model, dataloader, args.device, args.threshold, args.iou_threshold)
+        all_preds = run_inference_new(
+            model, dataloader, args.device, args.threshold, args.iou_threshold
+        )
 
         grouped_preds = defaultdict(list)
         for pred, meta in zip(all_preds, metadata_list):
-            grouped_preds[meta["original_idx"]].append({
-                "segment_idx": meta["segment_idx"],
-                "class": pred["class"],
-                "intervals": pred["intervals"]
-            })
+            grouped_preds[meta["original_idx"]].append(
+                {
+                    "segment_idx": meta["segment_idx"],
+                    "class": pred["class"],
+                    "intervals": pred["intervals"],
+                }
+            )
 
         # Reconstruction: map segment indices and columns back to seconds
         sec_per_col = 0.02
@@ -370,7 +430,7 @@ if __name__ == "__main__":
 
         for seg in segs_sorted:
             offset_cols = seg["segment_idx"] * (args.total_spec_columns / 2)
-            for (start_col, end_col, score) in seg["intervals"]:
+            for start_col, end_col, score in seg["intervals"]:
                 start_sec = (offset_cols + start_col) * sec_per_col
                 end_sec = (offset_cols + end_col) * sec_per_col
                 classes.append(id_to_cluster.get(seg["class"]))
@@ -378,7 +438,12 @@ if __name__ == "__main__":
                 offsets.append(float(end_sec))
                 scores.append(float(score))
 
-        final_preds = {"onset": onsets, "offset": offsets, "cluster": classes, "score": scores}
+        final_preds = {
+            "onset": onsets,
+            "offset": offsets,
+            "cluster": classes,
+            "score": scores,
+        }
 
         # Save predictions per file
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
@@ -390,7 +455,7 @@ if __name__ == "__main__":
         # Load labels
         with open(label_path, "r") as f:
             labels = json.load(f)
-        
+
         clusters = labels["cluster"]
         labels["cluster"] = [ID_TO_CLUSTER[FIXED_CLUSTER_CODEBOOK[c]] for c in clusters]
 
@@ -399,7 +464,6 @@ if __name__ == "__main__":
             quality_list = labels["quality"]
         else:
             quality_list = ["unknown"] * len(labels["onset"])
-
 
         # Fill global collectors
         all_labels["onset"].extend(labels["onset"])
@@ -412,7 +476,9 @@ if __name__ == "__main__":
         all_preds_final["cluster"].extend(final_preds["cluster"])
         all_preds_final["score"].extend(final_preds["score"])
 
-    metrics = evaluate_detection_metrics_with_false_class_qualities(all_labels, all_preds_final)
+    metrics = evaluate_detection_metrics_with_false_class_qualities(
+        all_labels, all_preds_final
+    )
     """
     # compute racll for each quality class
     quality_classes = sorted(set(all_labels["quality"]))
@@ -432,7 +498,9 @@ if __name__ == "__main__":
     metrics_path = os.path.join(save_dir, "metrics_all_qualities.txt")
 
     with open(metrics_path, "w") as f:
-        f.write(f"Global metrics for threshold {args.threshold} and iou threshold {args.iou_threshold}:\n")
+        f.write(
+            f"Global metrics for threshold {args.threshold} and iou threshold {args.iou_threshold}:\n"
+        )
         f.write(f"TP: {metrics['tp']}\n")
         f.write(f"FP: {metrics['fp']}\n")
         f.write(f"FN: {metrics['fn']}\n")
@@ -457,8 +525,8 @@ if __name__ == "__main__":
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
     # Confusion matrix for classes + None
-    all_classes = sorted(set(all_labels["cluster"]))   # All true classes
-    class_names = all_classes + ["None"]               # Additional None class
+    all_classes = sorted(set(all_labels["cluster"]))  # All true classes
+    class_names = all_classes + ["None"]  # Additional None class
 
     y_true = []
     y_pred = []
@@ -468,12 +536,16 @@ if __name__ == "__main__":
 
     # Match events as in evaluate_detection_metrics_with_false_class
     overlap_tolerance = 0.001
-    for p_idx, (po, pf, pc) in enumerate(zip(all_preds_final['onset'],
-                                            all_preds_final['offset'],
-                                            all_preds_final['cluster'])):
-        for l_idx, (lo, lf, lc) in enumerate(zip(all_labels['onset'],
-                                                all_labels['offset'],
-                                                all_labels['cluster'])):
+    for p_idx, (po, pf, pc) in enumerate(
+        zip(
+            all_preds_final["onset"],
+            all_preds_final["offset"],
+            all_preds_final["cluster"],
+        )
+    ):
+        for l_idx, (lo, lf, lc) in enumerate(
+            zip(all_labels["onset"], all_labels["offset"], all_labels["cluster"])
+        ):
             if l_idx in matched_labels or p_idx in matched_preds:
                 continue
             intersection = max(0, min(pf, lf) - max(po, lo))
@@ -492,13 +564,13 @@ if __name__ == "__main__":
                     y_pred.append(pc)
 
     # False negatives (labels without match)
-    for l_idx, lc in enumerate(all_labels['cluster']):
+    for l_idx, lc in enumerate(all_labels["cluster"]):
         if l_idx not in matched_labels:
             y_true.append(lc)
             y_pred.append("None")
 
     # False positives (predictions without match)
-    for p_idx, pc in enumerate(all_preds_final['cluster']):
+    for p_idx, pc in enumerate(all_preds_final["cluster"]):
         if p_idx not in matched_preds:
             y_true.append("None")
             y_pred.append(pc)

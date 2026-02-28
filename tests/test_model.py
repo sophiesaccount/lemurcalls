@@ -17,12 +17,13 @@ from lemurcalls.whisperformer.model import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def whisper_base_encoder():
     """Create a Whisper Base encoder from config only (no pretrained weights)."""
     config = WhisperConfig(
         d_model=512,
-        encoder_layers=2,          # small for fast tests
+        encoder_layers=2,  # small for fast tests
         encoder_attention_heads=8,
         encoder_ffn_dim=2048,
         decoder_layers=2,
@@ -37,8 +38,8 @@ def whisper_base_encoder():
 # Tests: Individual components
 # ---------------------------------------------------------------------------
 
-class TestClassificationHead:
 
+class TestClassificationHead:
     def test_output_shape(self):
         B, T, D, C = 2, 1500, 512, 3
         head = ClassificationHead(input_dim=D, num_classes=C, num_layers=2)
@@ -48,7 +49,6 @@ class TestClassificationHead:
 
 
 class TestRegressionHead:
-
     def test_output_shape(self):
         B, T, D = 2, 1500, 512
         head = RegressionHead(input_dim=D, num_layers=2)
@@ -66,7 +66,6 @@ class TestRegressionHead:
 
 
 class TestLightDecoder:
-
     def test_output_shape_preserved(self):
         B, T, D = 2, 1500, 512
         decoder = LightDecoder(d_model=D, num_layers=2)
@@ -79,8 +78,8 @@ class TestLightDecoder:
 # Tests: Full WhisperFormer
 # ---------------------------------------------------------------------------
 
-class TestWhisperFormer:
 
+class TestWhisperFormer:
     def test_forward_shapes_base(self, whisper_base_encoder):
         """WhisperFormer with Base encoder should produce correct output shapes."""
         num_classes = 3
@@ -107,8 +106,10 @@ class TestWhisperFormer:
     def test_regression_nonnegative(self, whisper_base_encoder):
         """Regression output should be non-negative."""
         model = WhisperFormer(
-            encoder=whisper_base_encoder, num_classes=3,
-            num_decoder_layers=1, num_head_layers=1,
+            encoder=whisper_base_encoder,
+            num_classes=3,
+            num_decoder_layers=1,
+            num_head_layers=1,
         )
         model.eval()
 
@@ -122,8 +123,10 @@ class TestWhisperFormer:
         """Model should work with different numbers of output classes."""
         for num_classes in [1, 3, 8]:
             model = WhisperFormer(
-                encoder=whisper_base_encoder, num_classes=num_classes,
-                num_decoder_layers=1, num_head_layers=1,
+                encoder=whisper_base_encoder,
+                num_classes=num_classes,
+                num_decoder_layers=1,
+                num_head_layers=1,
             )
             model.eval()
             x = torch.randn(1, 80, 3000)

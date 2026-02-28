@@ -14,14 +14,16 @@ def json_to_raven_selection_table(json_path, output_path):
     if missing:
         raise ValueError(f"JSON {json_path} is missing keys: {missing}")
 
-    df = pd.DataFrame({
-        "Selection": range(1, len(predictions["onset"]) + 1),
-        "View": ["-"] * len(predictions["onset"]),
-        "Channel": [1] * len(predictions["onset"]),
-        "Begin Time (s)": predictions["onset"],
-        "End Time (s)": predictions["offset"],
-        "Cluster": predictions["cluster"],
-    })
+    df = pd.DataFrame(
+        {
+            "Selection": range(1, len(predictions["onset"]) + 1),
+            "View": ["-"] * len(predictions["onset"]),
+            "Channel": [1] * len(predictions["onset"]),
+            "Begin Time (s)": predictions["onset"],
+            "End Time (s)": predictions["offset"],
+            "Cluster": predictions["cluster"],
+        }
+    )
 
     df.to_csv(output_path, sep="\t", index=False)
     print(f"Raven selection table saved: {output_path}")

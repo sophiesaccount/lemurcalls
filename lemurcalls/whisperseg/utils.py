@@ -14,7 +14,7 @@ def create_if_not_exists(folder):
         str: The same folder path.
     """
     if not os.path.exists(folder):
-        os.makedirs( folder )
+        os.makedirs(folder)
     return folder
 
 
@@ -27,4 +27,4 @@ def get_lr(optimizer):
     Returns:
         list: Learning rate for each param group.
     """
-    return [param_group['lr'] for param_group in optimizer.param_groups ]
+    return [param_group["lr"] for param_group in optimizer.param_groups]

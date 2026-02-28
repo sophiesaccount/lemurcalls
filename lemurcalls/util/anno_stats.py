@@ -26,9 +26,9 @@ def count(path: str) -> List[defaultdict]:
         d = defaultdict(int)
         # iterate over selection table list in steps of 2 (waveform part + spectrogram part)
         for i in range(0, len(lines), 2):
-            prefix = 1 if lines[i][-1][0] == '-' else 0
+            prefix = 1 if lines[i][-1][0] == "-" else 0
             # count parent classe separately
-            if lines[i][-1][prefix:] not in ['p1', 'p2', 'p3']:
+            if lines[i][-1][prefix:] not in ["p1", "p2", "p3"]:
                 label = lines[i][-1][prefix:].rstrip(digits)
             else:
                 label = lines[i][-1][prefix:]
@@ -36,6 +36,7 @@ def count(path: str) -> List[defaultdict]:
         dicts.append(d)
     print(f"Processed {len(dicts)} files.")
     return dicts
+
 
 def sum_dicts(dicts: list, classes: dict) -> defaultdict:
     """Sums up the number of annotations per label in a list of dictionaries.
@@ -59,10 +60,13 @@ def sum_dicts(dicts: list, classes: dict) -> defaultdict:
                 not_counted.append(k)
             total2 += v
     if total1 != total2:
-        logging.warning(f"Total annotations: {total2}, but sum of annotations per label: {total1}")
+        logging.warning(
+            f"Total annotations: {total2}, but sum of annotations per label: {total1}"
+        )
     if len(not_counted) > 0:
         logging.warning(f"Labels not counted: {set(not_counted)}")
     return d, total1
+
 
 def pretty_print(d: defaultdict, classes: dict, show_zeros: bool = True):
     """Pretty prints the number of annotations per label
@@ -73,10 +77,23 @@ def pretty_print(d: defaultdict, classes: dict, show_zeros: bool = True):
         show_zeros (bool, optional): Whether to show annotations with 0 occurrences. Defaults to True.
     """
     if show_zeros:
-        stats = '\n'.join((cl + ':  ' + f'{"":>4}'.join([f"{k:>2}: {d[k]:>3}" for k in classes[cl]])) for cl in classes.keys())
+        stats = "\n".join(
+            (cl + ":  " + f"{'':>4}".join([f"{k:>2}: {d[k]:>3}" for k in classes[cl]]))
+            for cl in classes.keys()
+        )
     else:
-        stats = '\n'.join((cl + ':  ' + f'{"":>4}'.join([f"{k:>2}: {d[k]:>3}" for k in classes[cl] if d[k] > 0])) for cl in classes.keys())
+        stats = "\n".join(
+            (
+                cl
+                + ":  "
+                + f"{'':>4}".join(
+                    [f"{k:>2}: {d[k]:>3}" for k in classes[cl] if d[k] > 0]
+                )
+            )
+            for cl in classes.keys()
+        )
     print(stats)
+
 
 def annotation_statistics(path: str, config_path: str, mode: str):
     """Assembles statistics for Raven selection tables in directory recursively: number of annotations per label
@@ -85,7 +102,7 @@ def annotation_statistics(path: str, config_path: str, mode: str):
         path (str): Path to directory in which to search for selection table .txt files
         config_path (str): Path to the config file detailing all annotation classes
     """
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         classes = yaml.safe_load(f)
     d, total = sum_dicts(count(path), classes)
     if mode == "moan_vocal":
@@ -97,25 +114,89 @@ def annotation_statistics(path: str, config_path: str, mode: str):
     elif mode == "thesis":
         # [ cl,   m,   l,  ca, sh,  b, pc, p1, cm,       +           h,  pu,  mo,  w, p2, +        t, sq,  y, hu, + ],
         # cut: P1: ht, o, ud, n, e, c; P2: hw, d, up; P3: p3, se, sk, wa, ho
-        print(f"{d['cl']}, {d['m']}, {d['l']}, {d['ca']}, {d['sh']}, {d['b']}, {d['pc']}, {d['p1']}, {d['cm']}, {d['ht']+d['o']+d['ud']+d['n']+d['e']+d['c']}, {d['h']}, {d['pu']}, {d['mo']}, {d['w']}, {d['p2']}, {d['hw']+d['d']+d['up']}, {d['t']}, {d['sq']}, {d['y']}, {d['hu']}, {d['p3']+d['se']+d['sk']+d['wa']+d['ho']}")
-        print('Total annotations: ', d['cl'] + d['m'] + d['l'] + d['ca'] + d['sh'] + d['b'] + d['pc'] + d['p1'] + d['cm'] + d['ht']+d['o']+d['ud']+d['n']+d['e']+d['c'] + d['h'] + d['pu'] + d['mo'] + d['w'] + d['p2'] + d['hw']+d['d']+d['up'] + d['t'] + d['sq'] + d['y'] + d['hu'] + d['p3']+d['se']+d['sk']+d['wa']+d['ho'])
+        print(
+            f"{d['cl']}, {d['m']}, {d['l']}, {d['ca']}, {d['sh']}, {d['b']}, {d['pc']}, {d['p1']}, {d['cm']}, {d['ht'] + d['o'] + d['ud'] + d['n'] + d['e'] + d['c']}, {d['h']}, {d['pu']}, {d['mo']}, {d['w']}, {d['p2']}, {d['hw'] + d['d'] + d['up']}, {d['t']}, {d['sq']}, {d['y']}, {d['hu']}, {d['p3'] + d['se'] + d['sk'] + d['wa'] + d['ho']}"
+        )
+        print(
+            "Total annotations: ",
+            d["cl"]
+            + d["m"]
+            + d["l"]
+            + d["ca"]
+            + d["sh"]
+            + d["b"]
+            + d["pc"]
+            + d["p1"]
+            + d["cm"]
+            + d["ht"]
+            + d["o"]
+            + d["ud"]
+            + d["n"]
+            + d["e"]
+            + d["c"]
+            + d["h"]
+            + d["pu"]
+            + d["mo"]
+            + d["w"]
+            + d["p2"]
+            + d["hw"]
+            + d["d"]
+            + d["up"]
+            + d["t"]
+            + d["sq"]
+            + d["y"]
+            + d["hu"]
+            + d["p3"]
+            + d["se"]
+            + d["sk"]
+            + d["wa"]
+            + d["ho"],
+        )
     else:
         logging.warning(f"Unknown mode: {mode}")
+
 
 if __name__ == "__main__":
     logging.basicConfig()
     logging.getLogger().setLevel(logging.WARNING)
 
-    parser = argparse.ArgumentParser(description="Assembles statistics for Raven selection tables in directory recursively: number of annotations per label")
-    parser.add_argument("-p", "--path", type=str, help="Path to directory in which to search for selection table .txt files", required=True)
-    parser.add_argument("-s", "--show_per_file", action="store_true", help="Show the number of annotations per label per file")
-    parser.add_argument("-c", "--config-path", type=str, help="Path to the config file detailing all annotation classes", default='./config/classes.yaml')
-    parser.add_argument("-m", "--mode", choices=['all', 'moan_vocal', 'thesis'], nargs="?", const="all", default="all", help="Whether to show all annotations, only moan and vocal annotations, or a thesis-friendly format. Defaults to %(default)s.")
+    parser = argparse.ArgumentParser(
+        description="Assembles statistics for Raven selection tables in directory recursively: number of annotations per label"
+    )
+    parser.add_argument(
+        "-p",
+        "--path",
+        type=str,
+        help="Path to directory in which to search for selection table .txt files",
+        required=True,
+    )
+    parser.add_argument(
+        "-s",
+        "--show_per_file",
+        action="store_true",
+        help="Show the number of annotations per label per file",
+    )
+    parser.add_argument(
+        "-c",
+        "--config-path",
+        type=str,
+        help="Path to the config file detailing all annotation classes",
+        default="./config/classes.yaml",
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        choices=["all", "moan_vocal", "thesis"],
+        nargs="?",
+        const="all",
+        default="all",
+        help="Whether to show all annotations, only moan and vocal annotations, or a thesis-friendly format. Defaults to %(default)s.",
+    )
     args = parser.parse_args()
 
     if args.show_per_file:
         for p in get_flex_file_iterator(args.path):
-            print(f'- File {p} contains:')
+            print(f"- File {p} contains:")
             annotation_statistics(p, args.config_path, args.mode)
             print()
     else:
