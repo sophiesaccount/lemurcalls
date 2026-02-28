@@ -1170,11 +1170,13 @@ if __name__ == "__main__":
     plt.plot(train_loss_history, label="Training Loss")
     plt.plot(train_loss_history_class, label="Training Loss Class")
     plt.plot(train_loss_history_reg, label="Training Loss Regression")
-    for i in range(len(thresholds)):
-        plt.plot([sublist[i] for sublist in f1_scores_val], label=f"Validation F1 for threshold {thresholds[i]}")
-        #plt.plot(f1_scores_val_m, label="Validation F1 Moan")
-        #plt.plot([sublist[i] for sublist in recall_scores_val], label=f"Validation Recall for threshold {thresholds[i]}")
-        #plt.plot([sublist[i] for sublist in precision_scores_val], label=f"Validation Precision for threshold {thresholds[i]}")
+    if len(f1_scores_val) > 0:
+        thresholds = args.thresholds
+        for i in range(len(thresholds)):
+            plt.plot([sublist[i] for sublist in f1_scores_val], label=f"Validation F1 for threshold {thresholds[i]}")
+            #plt.plot(f1_scores_val_m, label="Validation F1 Moan")
+            #plt.plot([sublist[i] for sublist in recall_scores_val], label=f"Validation Recall for threshold {thresholds[i]}")
+            #plt.plot([sublist[i] for sublist in precision_scores_val], label=f"Validation Precision for threshold {thresholds[i]}")
     
     # Vertikal lines for LR reduction
     for epoch_idx, lr_val in lr_reduction_epochs:
